@@ -1,0 +1,30 @@
+#!/usr/bin/python3
+"""obs-results <apiurl> <project> [package]: per repo/arch build state."""
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+
+
+def results(api, prj, pkg=None):
+    path = f"/build/{prj}/_result" + (f"?package={pkg}&multibuild=1&locallink=1" if pkg else "")
+    out = subprocess.run(["osc", "-A", api, "api", path], capture_output=True,
+                         text=True, timeout=300)
+    if out.returncode != 0:
+        raise RuntimeError(out.stderr.strip()[-500:])
+    rows = []
+    for r in ET.fromstring(out.stdout).findall("result"):
+        for s in r.findall("status"):
+            rows.append({"repo": r.get("repository"), "arch": r.get("arch"),
+                         "package": s.get("package"), "code": s.get("code"),
+                         "details": (s.findtext("details") or "").strip(),
+                         "repostate": r.get("state"), "dirty": r.get("dirty") == "true"})
+    return rows
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 3:
+        sys.exit(__doc__)
+    for row in results(*sys.argv[1:4]):
+        d = f" ({row['details']})" if row["details"] else ""
+        dirty = " [dirty]" if row["dirty"] else ""
+        print(f"{row['repo']:40} {row['arch']:8} {row['package']:30} {row['code']}{d}{dirty}")

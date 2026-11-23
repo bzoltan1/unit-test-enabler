@@ -1,0 +1,68 @@
+# test-enabler configuration. Copy to enabler.conf and edit.
+# Sourced by every host/ script. Keep enabler.conf private: it names
+# credential files (not their contents) and internal hosts.
+
+# --- identity ---------------------------------------------------------
+# OBS/IBS and Gitea user. The containers may write only to
+# home:$OBS_USER* projects and $OBS_USER/* git forks.
+OBS_USER=your-obs-user
+GIT_NAME="Your Name"
+GIT_EMAIL=you@example.com
+
+# --- data ---------------------------------------------------------------
+# Directory with sle15_fix_order.csv, ENABLE_TESTS_PROMPT.md, the lessons
+# files (LESSONS*.md, *_learnings.md) and progress.md. Start from
+# data-example/ in this repository.
+ENABLER_DATA=$HOME/test-enabler-data
+
+# --- internal build service and Gitea ---------------------------------
+# API URL of the internal OBS instance (IBS) that builds the SLE
+# maintenance updates, its Gitea host for the SLFO git workflow, and the
+# name of that host's login in your tea config.
+IBS_API=https://api.ibs.example.com
+IBS_GITEA=gitea.ibs.example.com
+IBS_TEA_LOGIN=ibs
+# tea login of src.opensuse.org.
+OBS_TEA_LOGIN=opensuse
+# Optional: zypper repository and package with the internal CA, if the
+# internal hosts use certificates from a private CA.
+INTERNAL_CA_REPO=
+INTERNAL_CA_PACKAGE=
+# Bugzilla for the read-only MCP server.
+BUGZILLA_URL=https://bugzilla.suse.com
+
+# --- credentials (read by host/create-secrets.py only) -----------------
+# osc config with sections for https://api.opensuse.org and $IBS_API
+# (the IBS section may use sshkey= signature auth).
+OSCRC=$HOME/.config/osc/oscrc
+# SSH private key used for osc signature auth to IBS. No passphrase.
+SSH_KEY_IBS=$HOME/.ssh/id_ibs
+# SSH private keys registered on $IBS_GITEA and src.opensuse.org.
+SSH_KEY_IBS_GITEA=$HOME/.ssh/id_ibs_gitea
+SSH_KEY_OBS_GITEA=$HOME/.ssh/id_obs_gitea
+# tea config with the logins $OBS_TEA_LOGIN and $IBS_TEA_LOGIN, including
+# API tokens. git-obs reads the same file.
+TEA_CONFIG=$HOME/.config/tea/config.yml
+# $IBS_GITEA API token (plain file).
+IBS_GITEA_TOKEN=$HOME/.config/test-enabler/ibs_gitea.token
+# Bugzilla API key (plain file).
+BUGZILLA_KEY=$HOME/.config/test-enabler/bugzilla.key
+# opencode config holding the provider definitions and API keys for the
+# two models below.
+OPENCODE_CONFIG=$HOME/.config/opencode/opencode.json
+# Google application default credentials for Vertex AI.
+VERTEX_ADC=$HOME/.config/gcloud/application_default_credentials.json
+
+# --- skills ---------------------------------------------------------------
+# The openSUSE-packaging skill is not part of this repository. Point to a
+# local copy (directory containing opensuse-packaging/) or a git repo.
+SKILLS_SRC=$HOME/.config/opencode/skills
+SKILLS_GIT=
+SKILLS_REF=main
+# Extra names to scrub from the skills (comma-separated), for example
+# the skill author's user name. OBS_USER, GIT_NAME, GIT_EMAIL always are.
+SANITIZE_EXTRA_IDS=
+
+# --- models -------------------------------------------------------------
+WORKER_MODEL=helmcode/deepseek-v4-flash
+REVIEWER_MODEL=google-vertex/claude-opus-5-5@default

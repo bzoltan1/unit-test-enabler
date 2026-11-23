@@ -1,0 +1,12 @@
+{
+  "_comment": "USD per 1M tokens. A model with \"use_opencode_cost\": true uses the cost opencode reports (models.dev list prices). Set the helmcode prices from your contract; while they are null the worker tokens are counted but not priced.",
+  "helmcode/deepseek-v4-flash": {
+    "input": null,
+    "output": null,
+    "cache_read": null,
+    "cache_write": null
+  },
+  "google-vertex/claude-opus-5-5@default": {
+    "use_opencode_cost": true
+  }
+}

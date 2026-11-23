@@ -1,0 +1,22 @@
+#!/bin/bash
+# Checks every credential, the KVM build path and both models from
+# inside the container. Run by ./setup.sh --smoke.
+set -uo pipefail
+export PATH=/opt/enabler/guard:/opt/enabler/bin:$PATH
+fail=0
+t() { local name=$1; shift; if out=$("$@" 2>&1); then echo "  [ok]   $name"; else
+      echo "  [FAIL] $name: $(echo "$out" | tail -2 | tr '\n' ' ')"; fail=1; fi; }
+cd /work
+t "osc OBS login"       osc -A https://api.opensuse.org whois
+t "osc IBS login"       osc -A "$IBS_API" whois
+t "ssh src.opensuse.org" bash -c 'ssh -T gitea@src.opensuse.org 2>&1 | grep -q "successfully authenticated"'
+t "ssh $IBS_GITEA"      bash -c "ssh -T gitea@$IBS_GITEA 2>&1 | grep -q 'successfully authenticated'"
+t "git-obs $IBS_GITEA API" bash -c "git-obs -G $IBS_TEA_LOGIN api /user | grep -q '\"login\"'"
+t "guard blocks submit" bash -c '! osc sr A b C 2>/dev/null'
+t "kvm build (which, Tumbleweed)" bash -c '
+  mkdir -p /work/smoke && cd /work/smoke && osc -A https://api.opensuse.org co -o . openSUSE:Factory which >/dev/null &&
+  osc build standard x86_64 --vm-type=kvm --vm-disk-size=4000 --noservice which.spec >/work/smoke.log 2>&1'
+t "worker model"   bash -c 'opencode run --auto --agent worker "Reply with the single word PONG" </dev/null | grep -q PONG'
+t "reviewer model" bash -c 'opencode run --auto --agent reviewer "Reply with the single word PONG" </dev/null | grep -q PONG'
+t "bugzilla MCP"   bash -c 'opencode run --auto --agent worker "Use the bugzilla MCP bug_info tool on bug 1199999 and reply with its product only" </dev/null | grep -qi tumbleweed'
+[ $fail -eq 0 ] && echo "smoke test passed" || { echo "smoke test FAILED"; exit 1; }

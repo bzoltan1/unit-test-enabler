@@ -1,0 +1,7 @@
+enabler.conf
+results/
+skills/
+agent/prompts/*.md
+agent/lessons/*.md
+__pycache__/
+*.pyc

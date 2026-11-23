@@ -1,0 +1,57 @@
+#!/bin/bash
+# local-build <repo> <arch> [extra osc build args]
+# Wraps osc build --vm-type=kvm: enforces the attempt limit, saves the
+# log in the phase directory and prints whether %check ran.
+set -uo pipefail
+[ $# -ge 2 ] || { echo "usage: local-build <repo> <arch> [osc build args]" >&2; exit 2; }
+repo=$1; arch=$2; shift 2
+dir=${ENABLER_PHASE_DIR:-/work/phase}
+limit=${LOCAL_BUILD_LIMIT:-8}
+mkdir -p "$dir/logs"
+cnt_file=$dir/local_build_count
+n=$(( $(cat "$cnt_file" 2>/dev/null || echo 0) + 1 ))
+if [ "$n" -gt "$limit" ]; then
+  echo "LOCAL BUILD LIMIT REACHED ($limit builds in this phase)."
+  echo "Stop here: write the report with outcome 'impossible' or 'blocked',"
+  echo "the evidence from the saved logs in $dir/logs, and what you tried."
+  exit 98
+fi
+echo "$n" > "$cnt_file"
+ts=$(date -u +%Y%m%dT%H%M%S)
+log="$dir/logs/${repo//\//_}-${arch}-${ts}.log"
+echo "local-build attempt $n/$limit: osc build $repo $arch (log: $log)"
+# Each build root holds a VM disk of BUILD_DISK_MB; keep only this one.
+for d in /work/buildroot/*/; do
+  [ -d "$d" ] && [ "$(basename "$d")" != "${repo//\//_}-$arch" ] && rm -rf --one-file-system "$d"
+done
+start=$(date +%s)
+# osc build does not take the API from .osc/_apiurl for every lookup; pass it.
+api_args=()
+[ -r .osc/_apiurl ] && api_args=(-A "$(cat .osc/_apiurl)")
+timeout "${LOCAL_BUILD_TIMEOUT:-14400}" osc "${api_args[@]}" build "$repo" "$arch" --vm-type=kvm \
+  --trust-all-projects \
+  --vm-memory="${BUILD_MEMORY:-8192}" --jobs="${BUILD_JOBS:-4}" \
+  --vm-disk-size="${BUILD_DISK_MB:-20000}" --clean "$@" > "$log" 2>&1
+rc=$?
+end=$(date +%s)
+echo "exit code: $rc, wall time: $(( (end-start)/60 )) min"
+if [ "$rc" -ne 0 ] && ! grep -q 'booting kvm' "$log"; then
+  echo "$((n - 1))" > "$cnt_file"
+  echo "The build VM never started (osc or setup error); this attempt is not counted."
+fi
+echo "----- last 60 log lines -----"
+tail -n 60 "$log"
+echo "----- %check detection -----"
+if grep -q 'Executing(%check)' "$log"; then
+  echo "%check section executed: yes"
+else
+  echo "%check section executed: NO (no 'Executing(%check)' in the log)"
+fi
+echo "----- possible test summary lines (verify in the log) -----"
+grep -E -i '(tests? passed|tests? failed|[0-9]+ (passed|failed|skipped)|^# (TOTAL|PASS|FAIL|SKIP|XFAIL|ERROR):|Ran [0-9]+ tests?|Tests run:|^(ok|FAIL)[[:space:]]+[a-z0-9./_-]+|^=+ .*(passed|failed).* =+$|100% tests passed|tests? out of)' "$log" | tail -n 40
+if grep -qiE 'No space left on device|disk full' "$log"; then
+  echo "The build VM disk is full. Rerun with a bigger disk:"
+  echo "  BUILD_DISK_MB=40000 local-build $repo $arch   (counts as an attempt)"
+fi
+echo "full log: $log"
+exit $rc

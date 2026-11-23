@@ -1,0 +1,3 @@
+package,priority_rank,list_status,work_package,difficulty,effort,factory_runs_tests,fedora_ref,debian_ref,validation_note,sle_buildlog
+examplepkg,1,valid,examplepkg,1_easy,1.0,no,examplepkg:tests,examplepkg:default,Fedora runs make check,no %check in the shipped build (examplepkg)
+example-wrapper,2,already_enabled,example-impl3,1_easy,1.0,example-impl3,example:tests,example:default,wrapper: real source example-impl3 already runs its tests,tests run (example-impl3)

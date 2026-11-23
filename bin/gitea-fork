@@ -1,0 +1,49 @@
+#!/usr/bin/python3
+"""gitea-fork <src.opensuse.org|$IBS_GITEA> <owner/repo>
+
+Create (or find) the fork of owner/repo in your own namespace. This is
+the one Gitea API write the container allows outside git/tea/git-obs:
+`git-obs repo fork` returns 404 for some scmsync pool repos while the
+API fork endpoint works. Prints the fork's SSH URL.
+"""
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+import yaml
+
+if len(sys.argv) != 3 or "/" not in sys.argv[2]:
+    sys.exit(__doc__)
+host, repo = sys.argv[1], sys.argv[2]
+user = os.environ["OBS_USER"]
+login = {"src.opensuse.org": os.environ.get("OBS_TEA_LOGIN", "opensuse"),
+         os.environ["IBS_GITEA"]: os.environ["IBS_TEA_LOGIN"]}.get(host)
+if not login:
+    sys.exit(f"host must be src.opensuse.org or {os.environ['IBS_GITEA']}")
+cfg = yaml.safe_load(open(os.path.expanduser("~/.config/tea/config.yml")))
+tok = next((l["token"] for l in cfg["logins"] if l["name"] == login), None)
+if not tok:
+    sys.exit(f"no token for login {login} in the tea config")
+hdr = {"Authorization": f"token {tok}", "Content-Type": "application/json"}
+name = repo.split("/", 1)[1]
+
+
+def call(method, path, body=None):
+    req = urllib.request.Request(f"https://{host}/api/v1{path}", method=method, headers=hdr,
+                                 data=json.dumps(body).encode() if body is not None else None)
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.load(r)
+
+
+try:
+    fork = call("GET", f"/repos/{user}/{name}")
+    print(f"exists: {fork['ssh_url']}")
+except urllib.error.HTTPError as e:
+    if e.code != 404:
+        sys.exit(f"GET {user}/{name}: HTTP {e.code}")
+    fork = call("POST", f"/repos/{repo}/forks", {})
+    if fork["owner"]["login"] != user:
+        sys.exit(f"fork landed in {fork['owner']['login']}, expected {user}")
+    print(f"created: {fork['ssh_url']}")
