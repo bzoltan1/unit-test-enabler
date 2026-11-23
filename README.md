@@ -115,6 +115,7 @@ Typical runs on the first packages:
 host/next-packages.sh 5         # next packages without a result (list_status valid/weak)
 host/run.sh dovecot gvfs        # one container per package
 host/status.sh                  # overview (also merges progress.md)
+host/requests.sh --open         # human review / build status of the agents' requests and PRs
 podman logs -f te-dovecot       # orchestrator log
 host/sync-progress.sh           # merge results into progress.md by hand
 host/create-secrets.sh          # after rotating a credential
@@ -179,6 +180,35 @@ host/costs.py --csv
   count.
 - These are list-price estimates. The provider invoices (GCP billing,
   helmcode) are authoritative.
+
+## Requests and PRs: human review status
+
+```bash
+host/requests.sh             # every request/PR the agents created; also results/REQUESTS.md
+host/requests.sh --open      # hide landed and closed ones
+host/requests.sh gvfs --json
+```
+
+- For OBS/IBS requests it shows the state, every review (user, group or
+  project, state, comment), people's comments, the supersede chain
+  (followed to the newest request) and the source package's build
+  results.
+- For Gitea PRs it shows the state, merge, WIP, requested reviewers,
+  reviews (approved or changes requested), comments and the commit
+  status (CI, staging bot).
+
+Each item gets one of these labels:
+
+| label | meaning |
+|---|---|
+| LANDED | accepted or merged |
+| ACTION | someone has to look: declined, changes requested, a person commented after our last comment, or the source build fails where the target package does not |
+| PLAN | dry run: a submit plan waits for you |
+| WAITING | open, nothing new |
+| CLOSED | revoked, superseded or closed without merge |
+
+Bot comments and build failures that the target package has too are not
+counted as needing action.
 
 ## Review rounds
 
