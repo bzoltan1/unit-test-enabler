@@ -103,10 +103,12 @@ class Run:
         self.state.setdefault("started", ts())
         self.state.setdefault("phases", {})
         self.state.setdefault("agent_calls", 0)
+        # The models a run started with stay recorded; replays and backfills
+        # of old runs only add their shadows.
         models = self.state.setdefault("models", {})
-        models.update({"worker": E.get("WORKER_MODEL", "helmcode/deepseek-v4-flash"),
-                       "reviewer": E.get("REVIEWER_MODEL", "google-vertex/claude-opus-5-5@default"),
-                       **SHADOWS})
+        models.setdefault("worker", E.get("WORKER_MODEL", "helmcode/deepseek-v4-flash"))
+        models.setdefault("reviewer", E.get("REVIEWER_MODEL", "helmcode/deepseek-v4-flash"))
+        models.update(SHADOWS)
         self.lock = threading.RLock()
         self.save()
         self.deadline = dt.datetime.fromisoformat(

@@ -54,7 +54,7 @@ RUN useradd -m -u 1000 -s /bin/bash agent \
 COPY --chown=agent:agent skills/ /home/agent/.config/opencode/skills/
 COPY agent/ /opt/enabler/agent/
 COPY bin/ /opt/enabler/bin/
-COPY prices.json /opt/enabler/prices.json
+COPY prices*.json /opt/enabler/
 COPY guard/ /opt/enabler/guard/
 RUN chmod +x /opt/enabler/bin/* /opt/enabler/guard/guard.py \
  && cd /opt/enabler/guard && for p in osc git git-obs tea; do ln -sf guard.py $p; done

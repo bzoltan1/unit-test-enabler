@@ -17,10 +17,14 @@ DEFAULT_MODELS = {"worker": "helmcode/deepseek-v4-flash",
 
 
 def load_prices(path):
-    try:
-        return {k: v for k, v in json.load(open(path)).items() if not k.startswith("_")}
-    except FileNotFoundError:
-        return {}
+    """prices.json, overridden by prices.local.json next to it (private)."""
+    out = {}
+    for p in (path, path.replace(".json", ".local.json")):
+        try:
+            out.update({k: v for k, v in json.load(open(p)).items() if not k.startswith("_")})
+        except FileNotFoundError:
+            pass
+    return out
 
 
 def scan_log(path):

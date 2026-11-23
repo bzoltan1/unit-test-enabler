@@ -5,3 +5,4 @@ agent/prompts/*.md
 agent/lessons/*.md
 __pycache__/
 *.pyc
+prices.local.json

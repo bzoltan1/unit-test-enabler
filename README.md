@@ -17,8 +17,8 @@ it unattended:
    the upstream tests in the devel project, following
    `ENABLE_TESTS_PROMPT.md` and the lessons files. It must pass a local
    `osc build --vm-type=kvm` with `%check` running.
-2. Review loop. A reviewer model (Claude Opus 5.5 on Vertex) reviews the
-   change. The worker fixes the findings and rebuilds locally, until the
+2. Review loop. A reviewer model (`REVIEWER_MODEL`, default DeepSeek V4
+   Flash in a separate, read-only session) reviews the change. The worker fixes the findings and rebuilds locally, until the
    reviewer approves or the round limit is reached.
 3. Publish. The worker commits to the home branch (OBS), or pushes to a
    fork and opens a "WIP:" PR (git workflow).
@@ -101,7 +101,7 @@ Accounts and credentials (paths in `enabler.conf`; all files are read by
 | `$IBS_GITEA` API token | Gitea API |
 | Bugzilla API key | bugwarden MCP, read only |
 | opencode.json with the worker and reviewer providers (API keys) | models |
-| Google ADC file for Vertex AI | reviewer model |
+| Google ADC file for Vertex AI | only for `google-vertex/...` models |
 
 Typical runs on the first packages:
 - A Factory change plus 4 SLE codestreams took 1.1 h and 8 agent calls.
@@ -164,8 +164,10 @@ host/costs.py dovecot -v    # per agent call
 host/costs.py --csv
 ```
 
-- Reviewer (Vertex Claude): opencode's own cost, from models.dev list
-  prices.
+- Models with known list prices (for example Vertex): opencode's own
+  cost, from models.dev.
+- `prices.local.json` (private, not committed) overrides `prices.json`,
+  for example to set a subscription model to 0.
 - Worker (helmcode): priced from `prices.json` (USD per 1M tokens for
   input, output, cache read and cache write). Until you fill in the
   contract prices, its tokens are shown as "unpriced". Rebuild the image

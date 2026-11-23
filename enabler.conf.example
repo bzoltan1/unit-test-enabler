@@ -50,7 +50,8 @@ BUGZILLA_KEY=$HOME/.config/test-enabler/bugzilla.key
 # opencode config holding the provider definitions and API keys for the
 # two models below.
 OPENCODE_CONFIG=$HOME/.config/opencode/opencode.json
-# Google application default credentials for Vertex AI.
+# Google application default credentials, only needed when a
+# google-vertex/... model is configured.
 VERTEX_ADC=$HOME/.config/gcloud/application_default_credentials.json
 
 # --- skills ---------------------------------------------------------------
@@ -65,7 +66,7 @@ SANITIZE_EXTRA_IDS=
 
 # --- models -------------------------------------------------------------
 WORKER_MODEL=helmcode/deepseek-v4-flash
-REVIEWER_MODEL=google-vertex/claude-opus-5-5@default
+REVIEWER_MODEL=helmcode/deepseek-v4-flash
 # Extra reviewer models (comma-separated provider/model) that review in
 # parallel with REVIEWER_MODEL, for comparison only. Their providers must
 # be in OPENCODE_CONFIG. Rerun host/create-secrets.sh after changing.

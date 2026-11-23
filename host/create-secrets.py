@@ -104,7 +104,12 @@ def main():
     put("te_ssh_obs_gitea", read("SSH_KEY_OBS_GITEA"))
     put("te_tea_config", tea())
     put("te_opencode_providers", providers())
-    put("te_vertex_adc", read("VERTEX_ADC"))
+    models = [E.get("WORKER_MODEL", ""), E.get("REVIEWER_MODEL", "")] + \
+        [m for m in E.get("SHADOW_REVIEWERS", "").split(",") if m.strip()]
+    if any(m.strip().startswith("google-vertex/") for m in models):
+        put("te_vertex_adc", read("VERTEX_ADC"))
+    else:
+        put("te_vertex_adc", "{}")         # no Vertex model in use
     put("te_ibs_gitea_token", read("IBS_GITEA_TOKEN").strip())
     put("te_bugzilla_key", read("BUGZILLA_KEY").strip())
 

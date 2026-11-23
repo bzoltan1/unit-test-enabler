@@ -14,7 +14,7 @@ with open(sys.argv[1]) as f:
     providers = json.load(f)["provider"]
 
 worker = os.environ.get("WORKER_MODEL", "helmcode/deepseek-v4-flash")
-reviewer = os.environ.get("REVIEWER_MODEL", "google-vertex/claude-opus-5-5@default")
+reviewer = os.environ.get("REVIEWER_MODEL", "helmcode/deepseek-v4-flash")
 
 PERMS = ["read", "edit", "glob", "grep", "list", "bash", "task", "skill", "lsp",
          "todoread", "todowrite", "webfetch", "websearch", "codesearch",

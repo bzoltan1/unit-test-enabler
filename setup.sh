@@ -57,10 +57,13 @@ done
 
 echo "== credential files named in enabler.conf"
 for v in OSCRC SSH_KEY_IBS SSH_KEY_IBS_GITEA SSH_KEY_OBS_GITEA TEA_CONFIG \
-         IBS_GITEA_TOKEN BUGZILLA_KEY OPENCODE_CONFIG VERTEX_ADC; do
+         IBS_GITEA_TOKEN BUGZILLA_KEY OPENCODE_CONFIG; do
   p=${!v:-}
   [ -n "$p" ] && [ -r "$p" ] && ok "$v" || bad "$v: ${p:-unset} not readable"
 done
+if echo "$WORKER_MODEL,$REVIEWER_MODEL,${SHADOW_REVIEWERS:-}" | grep -q 'google-vertex/'; then
+  [ -r "${VERTEX_ADC:-}" ] && ok "VERTEX_ADC" || bad "VERTEX_ADC: ${VERTEX_ADC:-unset} not readable (a google-vertex model is configured)"
+fi
 for v in SSH_KEY_IBS SSH_KEY_IBS_GITEA SSH_KEY_OBS_GITEA; do
   p=${!v:-}; [ -r "$p" ] || continue
   ssh-keygen -y -P '' -f "$p" >/dev/null 2>&1 && ok "$v has no passphrase" \
