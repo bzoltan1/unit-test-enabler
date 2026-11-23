@@ -455,9 +455,83 @@ with evidence. Do not loop.
 When the report is written, end your turn with one line: REPORT WRITTEN.
 """
 
+    def recover_verdict(self, who, phase, step, out):
+        """No verdict file: take the JSON verdict from the final reply, if any.
+
+        Recovered files carry "_source": "text" so the comparison can tell
+        a model that follows the instructions from one that does not.
+        """
+        if os.path.exists(out):
+            return True
+        texts = []
+        for f in sorted(glob.glob(f"{self.rdir}/agent-logs/*-{phase}-{step}-{who}.jsonl")):
+            for line in open(f, errors="replace"):
+                if '"text"' not in line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if e.get("type") == "text":
+                    texts.append(e.get("part", {}).get("text", ""))
+        for t in reversed(texts):
+            for m in reversed(list(re.finditer(r"\{", t))):
+                try:
+                    obj, _ = json.JSONDecoder().raw_decode(t[m.start():])
+                except ValueError:
+                    continue
+                if isinstance(obj, dict) and obj.get("verdict"):
+                    obj["_source"] = "text"
+                    with open(out, "w") as fh:
+                        json.dump(obj, fh, indent=1)
+                    self.log(f"{who} {phase}/{step}: verdict recovered from its reply")
+                    return True
+        return False
+
+    def shadow_view(self, who, tag=""):
+        """A results view for one shadow reviewer, without other verdicts.
+
+        Links what the primary reviewer also works from (the worker report,
+        the diff, the build logs, the shadow's own earlier reviews) and
+        leaves out everything that reveals another reviewer's verdict: the
+        other review files, agent transcripts, state.json, the orchestrator
+        log and learnings. opencode denies shadows any access to /results.
+        """
+        view = f"/work/.shadow-view/{who}/{self.pkg}{'-' + tag if tag else ''}"
+        shutil.rmtree(view, ignore_errors=True)
+        verdict = re.compile(r"^(claim-)?review-\d+(\..+)?\.json$")
+        for phase in ("factory", "sle"):
+            src = f"{self.rdir}/{phase}"
+            if not os.path.isdir(src):
+                continue
+            os.makedirs(f"{view}/{phase}")
+            for name in os.listdir(src):
+                if verdict.match(name) and not name.endswith(f".{who}.json"):
+                    continue
+                os.symlink(f"{src}/{name}", f"{view}/{phase}/{name}")
+        return view
+
+    def shadow_review(self, who, phase, step, msg, out):
+        """Run one shadow on msg (written for the real paths) inside its view."""
+        try:
+            view = self.shadow_view(who, f"{phase}-{step}")   # one view per round
+            vout = out.replace(self.rdir, view)
+            if os.path.islink(vout):
+                os.unlink(vout)
+            note = (f"\n\nYour copy of the run's results is {view}. Where a file names "
+                    f"{self.rdir}/..., read it as {view}/... (the same file; /results itself "
+                    "is not accessible to you). Review independently.\n")
+            self.agent(who, msg.replace(self.rdir, view) + note, phase, step, final=True)
+            if os.path.isfile(vout) and not os.path.islink(vout):
+                shutil.copy(vout, out)
+        except Exception as e:
+            self.log(f"{who} {phase}/{step} failed: {e}")
+        finally:
+            self.mark_failed(who, phase, step, out)
+
     def mark_failed(self, who, phase, step, out):
         """A shadow that wrote no verdict leaves a record with the reason."""
-        if os.path.exists(out):
+        if self.recover_verdict(who, phase, step, out):
             return
         err = "no review file written"
         for f in sorted(glob.glob(f"{self.rdir}/agent-logs/*-{phase}-{step}-{who}.jsonl")):
@@ -482,11 +556,10 @@ When the report is written, end your turn with one line: REPORT WRITTEN.
             shutil.copy(diff, out.replace(".json", ".diff"))
 
         def run(who, path):
-            try:
-                self.agent(who, make_msg(path), phase, step)
-            except Exception as e:          # a shadow failure never stops the run
+            try:                            # a shadow failure never stops the run
+                self.shadow_review(who, phase, step, make_msg(path), path)
+            except Exception as e:
                 self.log(f"{who} {step} failed: {e}")
-            self.mark_failed(who, phase, step, path)
             results[who] = self.read_json(path)
 
         threads = []
@@ -496,6 +569,7 @@ When the report is written, end your turn with one line: REPORT WRITTEN.
             t.start()
             threads.append(t)
         self.agent(REVIEWER, make_msg(out), phase, step)
+        self.recover_verdict(REVIEWER, phase, step, out)
         rv = self.read_json(out)
         for t in threads:
             t.join(timeout=REVIEWER_TIMEOUT + 600)
@@ -518,9 +592,10 @@ When the report is written, end your turn with one line: REPORT WRITTEN.
         pd = self.phase_dir(phase)
         out = out or f"{pd}/review-{rnd}.json"
         prev = ""
+        suffix = re.sub(r"^review-\d+|\.json$", "", os.path.basename(out))   # "" or ".shadow-x"
         for i in range(1, rnd):
-            if os.path.exists(f"{pd}/review-{i}.json"):
-                prev += f"\nPrevious review {i}: {pd}/review-{i}.json"
+            if os.path.exists(f"{pd}/review-{i}{suffix}.json"):
+                prev += f"\nPrevious review {i}: {pd}/review-{i}{suffix}.json"
         return f"""You are the reviewer of the unit test enabler: a senior openSUSE /
 SUSE packager. Be strict about correctness and honest evidence, and
 pragmatic about taste. You do not edit files and you never commit,
@@ -573,7 +648,8 @@ Write {out} with a bash heredoc, as JSON:
 Only list unrelated_failures_accepted when the context asks you to
 judge build failures the worker called unrelated, and you agree with
 the evidence.
-End with one line: REVIEW WRITTEN.
+Your final reply must also contain the same JSON object (if you run out
+of tool steps you can only reply in text). End with one line: REVIEW WRITTEN.
 """
 
     def msg_fix_review(self, phase, rnd):
@@ -755,7 +831,8 @@ Write @@OUT@@ with a bash heredoc, JSON:
 {{"verdict": "confirm" | "dispute", "summary": "...",
   "findings": [{{"severity": "blocker|major|minor", "where": "...",
                 "problem": "...", "fix": "what the worker must do"}}]}}
-End with: REVIEW WRITTEN."""
+Your final reply must also contain the same JSON object (if you run out
+of tool steps you can only reply in text). End with: REVIEW WRITTEN."""
             reason = str(rep.get("reason"))
             rv = self.reviewed(phase, f"claim{rnd}", "claim", rnd,
                                lambda o: msg_t.replace("@@OUT@@", o).replace("@@REASON@@", reason),
@@ -1006,6 +1083,9 @@ End with: REVIEW WRITTEN."""
             kind = "claim-review" if step.startswith("claim") else "review"
             primary = f"{self.phase_dir(phase)}/{kind}-{re.sub(r'\D', '', step)}.json"
             msg = open(p).read()
+            if "final reply must also contain" not in msg:
+                msg += ("\nYour final reply must also contain the same JSON object (if you "
+                        "run out of tool steps you can only reply in text).\n")
             if primary not in msg:
                 self.log(f"replay: {p} does not name {primary}; skipped")
                 continue
@@ -1013,15 +1093,16 @@ End with: REVIEW WRITTEN."""
                 out = primary.replace(".json", f".{who}.json")
                 if os.path.exists(out):
                     continue
-                jobs.append((who, msg.replace(primary, out), phase, f"{step}", out))
+                m = re.sub(r"(Previous review \d+: \S+?/(?:claim-)?review-\d+)\.json",
+                           rf"\1.{who}.json", msg)
+                jobs.append((who, m.replace(primary, out), phase, f"{step}", out))
         threads = []
         for who, msg, phase, step, out in jobs:
             def run(who=who, msg=msg, phase=phase, step=step, out=out):
                 try:
-                    self.agent(who, msg, phase, step, final=True)
+                    self.shadow_review(who, phase, step, msg, out)
                 except Exception as e:
                     self.log(f"replay {who} {phase}/{step} failed: {e}")
-                self.mark_failed(who, phase, step, out)
             t = threading.Thread(target=run, daemon=True)
             t.start()
             threads.append(t)

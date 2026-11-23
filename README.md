@@ -227,6 +227,21 @@ The comparison shows, per model:
 The markdown lists every round's findings side by side. Agreement only
 measures similarity to the primary, not quality: judge the findings.
 
+Shadows review independently:
+- Each one works in its own view of the results: links to the worker
+  report, the diff, the build logs and its own earlier reviews.
+- opencode denies it any access to `/results`, so it can't see other
+  verdicts, transcripts, `state.json` or the orchestrator log.
+- The worker and the primary reviewer may not read shadow verdicts.
+- Reviewers are capped at `SHADOW_MAX_STEPS` / `REVIEWER_MAX_STEPS` tool
+  steps, after which they must answer in text, and identical repeated
+  tool calls are refused.
+- A verdict given only in the final reply is recovered and counted in
+  the "text" column, since the file instruction wasn't followed.
+- `MODEL_LIMITS` tells opencode the context size of models your provider
+  config doesn't describe, so it compacts long reviews before the backend
+  rejects them.
+
 A replay can only use the last round, because the checkout no longer
 matches earlier rounds, and the last round is usually an approval. So a
 replay measures false alarms, not whether a model catches problems. Live
@@ -248,6 +263,8 @@ changes. Their providers must be in `OPENCODE_CONFIG`; rerun
 | BUILD_MEMORY / BUILD_JOBS | 8192 / 4 | build VM size |
 | BUILD_DISK_MB | 20000 | build VM disk; the worker can rerun one build with more |
 | SHADOW_REVIEWERS | empty | extra reviewer models for comparison (see above) |
+| SHADOW_MAX_STEPS / REVIEWER_MAX_STEPS | 120 / 200 | tool steps before a final answer is forced |
+| MODEL_LIMITS | empty | `provider/model=context:output` for models without limits in the opencode config |
 | COST_LIMIT_USD | 0 (none) | stop a package when its priced model cost exceeds this |
 | PENDING_GRACE_HOURS | 6 | stop waiting for builds stuck in scheduled/blocked (s390x) |
 | CPUS / MEMORY | unset | cgroup limits (need delegated cgroup controllers) |

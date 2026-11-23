@@ -12,7 +12,9 @@ Per model:
   changes (or disputed) where the primary approved (or confirmed);
   "laxer" = the opposite;
 - blocker/major findings per review;
-- failed reviews (no valid verdict file);
+- failed reviews (no verdict), and verdicts only given in the reply text
+  (recovered, the file instruction was not followed);
+- tool steps per review;
 - cost and time per review.
 The markdown shows each round's findings side by side, so a person can
 judge who found real problems: agreement only measures similarity to the
@@ -66,18 +68,21 @@ def main():
                                                                        "shadows": {}})
             rows["shadows"][who] = load(shadow_file)
             # cost and time of this shadow review
-            usd = dur = None
+            usd = dur = steps = None
             for c in calls:
                 if c["phase"] == phase and c["step"] == step and c["role"] == who:
-                    usd = c["usd"]
+                    usd, steps = c["usd"], c["steps"]
                     lf = glob.glob(f"{rdir}agent-logs/{c['call']:03d}-{phase}-{step}-{who}.jsonl")
                     dur = duration(lf[0]) if lf else None
-            pusd = next((c["usd"] for c in calls if c["phase"] == phase and c["step"] == step
-                         and c["role"] == "reviewer"), None)
-            for name, model, rv, u in (("primary", models.get("reviewer", "reviewer"), primary, pusd),
-                                       (who, models.get(who, who), rows["shadows"][who], usd)):
+            pc = next((c for c in calls if c["phase"] == phase and c["step"] == step
+                       and c["role"] == "reviewer"), {})
+            pusd, psteps = pc.get("usd"), pc.get("steps")
+            for name, model, rv, u, stp in (
+                    ("primary", models.get("reviewer", "reviewer"), primary, pusd, psteps),
+                    (who, models.get(who, who), rows["shadows"][who], usd, steps)):
                 s = stats.setdefault(model, {"n": 0, "failed": 0, "agree": 0, "stricter": 0,
                                              "laxer": 0, "bm": 0, "all": 0, "usd": [], "sec": [],
+                                             "text": 0, "steps": [],
                                              "primary": name == "primary", "keys": set()})
                 if key in s["keys"]:
                     continue
@@ -85,6 +90,10 @@ def main():
                 s["n"] += 1
                 if u is not None:
                     s["usd"].append(u)
+                if stp:
+                    s["steps"].append(stp)
+                if rv and rv.get("_source") == "text":
+                    s["text"] += 1
                 if name != "primary" and dur:
                     s["sec"].append(dur)
                 if not rv or not rv.get("verdict"):
@@ -106,12 +115,13 @@ def main():
         print("no shadow reviews yet: set SHADOW_REVIEWERS for new runs, or "
               "run host/shadow-replay.sh on finished ones")
         return
-    hdr = (f"{'model':42} {'reviews':>7} {'failed':>6} {'agree':>6} {'stricter':>8} "
-           f"{'laxer':>5} {'B+M/rev':>7} {'all/rev':>7} {'usd/rev':>7} {'min/rev':>7}")
+    hdr = (f"{'model':42} {'reviews':>7} {'failed':>6} {'text':>4} {'agree':>6} {'stricter':>8} "
+           f"{'laxer':>5} {'B+M/rev':>7} {'all/rev':>7} {'usd/rev':>7} {'min/rev':>7} {'steps':>5}")
     print(hdr)
-    md += ["| model | reviews | failed | agree with primary | stricter | laxer | blocker+major per review "
-           "| findings per review | USD per review | minutes per review |",
-           "|---|---|---|---|---|---|---|---|---|---|"]
+    md += ["| model | reviews | failed | verdict only in text | agree with primary | stricter | laxer "
+           "| blocker+major per review | findings per review | USD per review | minutes per review "
+           "| tool steps per review |",
+           "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for model, s in sorted(stats.items(), key=lambda kv: not kv[1]["primary"]):
         ok = s["n"] - s["failed"]
         agree = "primary" if s["primary"] else (f"{100 * s['agree'] // ok}%" if ok else "-")
@@ -119,10 +129,11 @@ def main():
         mins = f"{sum(s['sec']) / len(s['sec']) / 60:.1f}" if s["sec"] else "-"
         bm = f"{s['bm'] / ok:.1f}" if ok else "-"
         al = f"{s['all'] / ok:.1f}" if ok else "-"
-        print(f"{model[:42]:42} {s['n']:7} {s['failed']:6} {agree:>6} {s['stricter']:8} "
-              f"{s['laxer']:5} {bm:>7} {al:>7} {usd:>7} {mins:>7}")
-        md.append(f"| {model} | {s['n']} | {s['failed']} | {agree} | {s['stricter']} | {s['laxer']} "
-                  f"| {bm} | {al} | {usd} | {mins} |")
+        stp = f"{sum(s['steps']) / len(s['steps']):.0f}" if s["steps"] else "-"
+        print(f"{model[:42]:42} {s['n']:7} {s['failed']:6} {s['text']:4} {agree:>6} {s['stricter']:8} "
+              f"{s['laxer']:5} {bm:>7} {al:>7} {usd:>7} {mins:>7} {stp:>5}")
+        md.append(f"| {model} | {s['n']} | {s['failed']} | {s['text']} | {agree} | {s['stricter']} "
+                  f"| {s['laxer']} | {bm} | {al} | {usd} | {mins} | {stp} |")
     md += ["", "## Rounds", ""]
     for (pkg, phase, name), r in sorted(rounds.items()):
         md += [f"### {pkg} {phase} {name}", ""]

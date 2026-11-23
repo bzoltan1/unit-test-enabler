@@ -71,3 +71,11 @@ REVIEWER_MODEL=helmcode/deepseek-v4-flash
 # parallel with REVIEWER_MODEL, for comparison only. Their providers must
 # be in OPENCODE_CONFIG. Rerun host/create-secrets.sh after changing.
 SHADOW_REVIEWERS=
+# Tool steps before a reviewer must give its final answer.
+SHADOW_MAX_STEPS=120
+REVIEWER_MAX_STEPS=200
+# Context and output limits for models your opencode config does not
+# describe: provider/model=context:output, comma-separated. Set context
+# below the backend's hard limit so opencode compacts before a large read
+# overflows it.
+MODEL_LIMITS=
