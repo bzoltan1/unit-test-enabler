@@ -90,4 +90,11 @@ cfg = {
         },
     },
 }
+# Shadow reviewers: same read-only rules as the reviewer, other models.
+shadows = [m.strip() for m in os.environ.get("SHADOW_REVIEWERS", "").split(",") if m.strip()]
+import re  # noqa: E402
+for m in shadows:
+    name = "shadow-" + re.sub(r"[^a-z0-9]+", "-", m.lower()).strip("-")
+    cfg["agent"][name] = dict(cfg["agent"]["reviewer"], model=m,
+                              description=f"Shadow reviewer ({m}), comparison only")
 json.dump(cfg, sys.stdout, indent=2)

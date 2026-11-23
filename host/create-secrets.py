@@ -84,7 +84,8 @@ def providers():
     with open(path("OPENCODE_CONFIG")) as f:
         host = json.load(f)
     prov = {}
-    for model in (E.get("WORKER_MODEL", ""), E.get("REVIEWER_MODEL", "")):
+    shadows = [m.strip() for m in E.get("SHADOW_REVIEWERS", "").split(",") if m.strip()]
+    for model in [E.get("WORKER_MODEL", ""), E.get("REVIEWER_MODEL", "")] + shadows:
         name = model.split("/", 1)[0]
         if name not in host.get("provider", {}):
             sys.exit(f"provider {name!r} (from {model}) not in OPENCODE_CONFIG")

@@ -66,3 +66,7 @@ SANITIZE_EXTRA_IDS=
 # --- models -------------------------------------------------------------
 WORKER_MODEL=helmcode/deepseek-v4-flash
 REVIEWER_MODEL=google-vertex/claude-opus-5-5@default
+# Extra reviewer models (comma-separated provider/model) that review in
+# parallel with REVIEWER_MODEL, for comparison only. Their providers must
+# be in OPENCODE_CONFIG. Rerun host/create-secrets.sh after changing.
+SHADOW_REVIEWERS=

@@ -178,6 +178,60 @@ host/costs.py --csv
 - These are list-price estimates. The provider invoices (GCP billing,
   helmcode) are authoritative.
 
+## Review rounds
+
+```bash
+host/review-report.py        # per package and phase; also results/REVIEW_REPORT.md
+host/review-report.py -v     # every round
+```
+
+For every phase the report shows:
+- the review rounds in order, for example `CR(2M,5m) > A(2m) > A(1m)[b1]`:
+  the verdict, the findings by severity, and why the round happened
+  (initial, `[b1]` after build round 1, `[claim]` claim check);
+- rounds to the first approval, review rounds after build failures, and
+  build fix rounds;
+- time to approval, phase time and reviewer cost;
+- the live state of every request or PR. "LANDED" means accepted or
+  merged.
+
+The summary gives the share approved in the first round, the mean rounds
+to approval, and how many requests have landed. Each run also records
+its review history in `state.json`. Each round keeps the diff it
+reviewed as `review-N.diff`.
+
+## Comparing reviewer models
+
+`SHADOW_REVIEWERS` (comma-separated `provider/model`, in `enabler.conf`
+or the environment) runs extra reviewers in parallel with the primary.
+Each one gets the same prompt and the same checkout, and writes
+`review-N.shadow-<model>.json`. Only the primary's verdict drives the
+run. A shadow that fails leaves a record with the error.
+
+```bash
+SHADOW_REVIEWERS=google-vertex/gemini-3.5-flash,helmcode/qwen3.6 host/run.sh <pkg>
+SHADOW_REVIEWERS=... host/shadow-replay.sh <pkg>...   # finished runs: last round per phase
+host/compare-reviewers.py    # summary per model + results/REVIEWER_COMPARISON.md
+```
+
+The comparison shows, per model:
+- agreement with the primary verdict;
+- "stricter" (asked for changes where the primary approved) and "laxer"
+  (the opposite);
+- blocker and major findings per review;
+- failed reviews;
+- cost and minutes per review.
+
+The markdown lists every round's findings side by side. Agreement only
+measures similarity to the primary, not quality: judge the findings.
+
+A replay can only use the last round, because the checkout no longer
+matches earlier rounds, and the last round is usually an approval. So a
+replay measures false alarms, not whether a model catches problems. Live
+shadows on new runs also cover the rounds where the primary asked for
+changes. Their providers must be in `OPENCODE_CONFIG`; rerun
+`host/create-secrets.sh` after adding one.
+
 ## Settings (environment of host/run.sh)
 
 | variable | default | meaning |
@@ -191,6 +245,7 @@ host/costs.py --csv
 | WALL_HOURS | 24 | total time per package |
 | BUILD_MEMORY / BUILD_JOBS | 8192 / 4 | build VM size |
 | BUILD_DISK_MB | 20000 | build VM disk; the worker can rerun one build with more |
+| SHADOW_REVIEWERS | empty | extra reviewer models for comparison (see above) |
 | COST_LIMIT_USD | 0 (none) | stop a package when its priced model cost exceeds this |
 | PENDING_GRACE_HOURS | 6 | stop waiting for builds stuck in scheduled/blocked (s390x) |
 | CPUS / MEMORY | unset | cgroup limits (need delegated cgroup controllers) |

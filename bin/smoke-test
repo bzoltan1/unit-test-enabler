@@ -19,4 +19,8 @@ t "kvm build (which, Tumbleweed)" bash -c '
 t "worker model"   bash -c 'opencode run --auto --agent worker "Reply with the single word PONG" </dev/null | grep -q PONG'
 t "reviewer model" bash -c 'opencode run --auto --agent reviewer "Reply with the single word PONG" </dev/null | grep -q PONG'
 t "bugzilla MCP"   bash -c 'opencode run --auto --agent worker "Use the bugzilla MCP bug_info tool on bug 1199999 and reply with its product only" </dev/null | grep -qi tumbleweed'
+for m in $(echo "${SHADOW_REVIEWERS:-}" | tr ',' ' '); do
+  a="shadow-$(echo "$m" | tr 'A-Z' 'a-z' | sed -E 's/[^a-z0-9]+/-/g; s/^-|-$//g')"
+  t "shadow $m" bash -c "opencode run --auto --agent $a 'Reply with the single word PONG' </dev/null | grep -q PONG"
+done
 [ $fail -eq 0 ] && echo "smoke test passed" || { echo "smoke test FAILED"; exit 1; }

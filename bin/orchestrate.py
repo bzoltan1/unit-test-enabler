@@ -51,6 +51,15 @@ LIMITS = {
 SUBMIT = {"factory": E.get("SUBMIT_FACTORY", "1") == "1",
           "sle": E.get("SUBMIT_SLE", "0") == "1"}
 COST_LIMIT_USD = float(E.get("COST_LIMIT_USD", 0) or 0)   # 0 = no limit
+# Extra reviewer models run in parallel with the primary reviewer on the
+# same prompt. Their verdicts are recorded for comparison only.
+def shadow_name(model):
+    """Stable agent/file name of a shadow reviewer model."""
+    return "shadow-" + re.sub(r"[^a-z0-9]+", "-", model.lower()).strip("-")
+
+
+SHADOWS = {shadow_name(m.strip()): m.strip()
+           for m in E.get("SHADOW_REVIEWERS", "").split(",") if m.strip()}
 PRICES = "/opt/enabler/prices.json"
 POLL_SECONDS = int(E.get("POLL_SECONDS", 600))
 PENDING_GRACE_HOURS = float(E.get("PENDING_GRACE_HOURS", 6))
@@ -94,9 +103,11 @@ class Run:
         self.state.setdefault("started", ts())
         self.state.setdefault("phases", {})
         self.state.setdefault("agent_calls", 0)
-        self.state["models"] = {"worker": E.get("WORKER_MODEL", "helmcode/deepseek-v4-flash"),
-                                "reviewer": E.get("REVIEWER_MODEL",
-                                                  "google-vertex/claude-opus-5-5@default")}
+        models = self.state.setdefault("models", {})
+        models.update({"worker": E.get("WORKER_MODEL", "helmcode/deepseek-v4-flash"),
+                       "reviewer": E.get("REVIEWER_MODEL", "google-vertex/claude-opus-5-5@default"),
+                       **SHADOWS})
+        self.lock = threading.RLock()
         self.save()
         self.deadline = dt.datetime.fromisoformat(
             self.state["started"].replace("Z", "+00:00")) + \
@@ -111,7 +122,7 @@ class Run:
             return {}
 
     def save(self):
-        tmp = self.state_file + ".tmp"
+        tmp = self.state_file + f".tmp{threading.get_ident()}"
         with open(tmp, "w") as f:
             json.dump(self.state, f, indent=2)
         os.replace(tmp, self.state_file)
@@ -171,9 +182,10 @@ class Run:
     def agent(self, who, message, phase, step, session=None, final=False):
         if not final:
             self.check_deadline()
-        self.state["agent_calls"] += 1
-        n = self.state["agent_calls"]
-        self.save()
+        with self.lock:
+            self.state["agent_calls"] += 1
+            n = self.state["agent_calls"]
+            self.save()
         logf = f"{self.rdir}/agent-logs/{n:03d}-{phase}-{step}-{who}.jsonl"
         with open(f"{self.rdir}/agent-logs/{n:03d}-{phase}-{step}-{who}.prompt.md", "w") as f:
             f.write(message)
@@ -187,6 +199,8 @@ class Run:
                    ENABLER_GUARD_LOG=f"{self.rdir}/guard.log")
         remaining = max(60, int((self.deadline - now()).total_seconds()))
         timeout = min(WORKER_TIMEOUT if who == WORKER else REVIEWER_TIMEOUT, remaining)
+        if who.startswith("shadow"):
+            timeout = min(REVIEWER_TIMEOUT, remaining)
         if final:
             timeout = 1800
         self.log(f"agent call {n}: {who} {phase}/{step} (timeout {timeout // 60} min)")
@@ -225,7 +239,7 @@ class Run:
             self.costs()
         except Exception as e:
             self.log(f"cost accounting failed: {e}")
-        if not final:
+        if not final and not who.startswith("shadow"):
             self.check_budget()
         return sid
 
@@ -439,9 +453,68 @@ with evidence. Do not loop.
 When the report is written, end your turn with one line: REPORT WRITTEN.
 """
 
-    def msg_review(self, phase, rnd, context):
+    def mark_failed(self, who, phase, step, out):
+        """A shadow that wrote no verdict leaves a record with the reason."""
+        if os.path.exists(out):
+            return
+        err = "no review file written"
+        for f in sorted(glob.glob(f"{self.rdir}/agent-logs/*-{phase}-{step}-{who}.jsonl")):
+            m = re.findall(r'"type":"error".*?"message":"((?:[^"\\]|\\.){0,300})', open(f, errors="replace").read())
+            if m:
+                err = m[-1]
+        with open(out, "w") as fh:
+            json.dump({"verdict": None, "_error": err}, fh)
+
+    def reviewed(self, phase, step, kind, rnd, make_msg, out):
+        """Primary review plus the shadow reviewers, in parallel.
+
+        make_msg(out_path) builds the prompt; each reviewer writes its own
+        file. Only the primary result is returned. Every round is recorded
+        in the phase's review history.
+        """
+        started = ts()
+        results = {}
+        # Keep what this round reviewed: change.diff is overwritten later.
+        diff = f"{self.phase_dir(phase)}/change.diff"
+        if os.path.exists(diff):
+            shutil.copy(diff, out.replace(".json", ".diff"))
+
+        def run(who, path):
+            try:
+                self.agent(who, make_msg(path), phase, step)
+            except Exception as e:          # a shadow failure never stops the run
+                self.log(f"{who} {step} failed: {e}")
+            self.mark_failed(who, phase, step, path)
+            results[who] = self.read_json(path)
+
+        threads = []
+        for who in SHADOWS:
+            path = out.replace(".json", f".{who}.json")
+            t = threading.Thread(target=run, args=(who, path), daemon=True)
+            t.start()
+            threads.append(t)
+        self.agent(REVIEWER, make_msg(out), phase, step)
+        rv = self.read_json(out)
+        for t in threads:
+            t.join(timeout=REVIEWER_TIMEOUT + 600)
+
+        def counts(r):
+            c = {}
+            for f in r.get("findings") or []:
+                c[f.get("severity", "?")] = c.get(f.get("severity", "?"), 0) + 1
+            return c
+        with self.lock:
+            self.ph(phase).setdefault("reviews", []).append({
+                "step": step, "kind": kind, "round": rnd, "started": started, "finished": ts(),
+                "verdict": rv.get("verdict"), "findings": counts(rv),
+                "shadows": {w: {"model": SHADOWS[w], "verdict": results.get(w, {}).get("verdict"),
+                                "findings": counts(results.get(w, {}))} for w in SHADOWS}})
+            self.save()
+        return rv
+
+    def msg_review(self, phase, rnd, context, out=None):
         pd = self.phase_dir(phase)
-        out = f"{pd}/review-{rnd}.json"
+        out = out or f"{pd}/review-{rnd}.json"
         prev = ""
         for i in range(1, rnd):
             if os.path.exists(f"{pd}/review-{i}.json"):
@@ -614,8 +687,10 @@ verified counts and the Factory reference). A human will run it."""
             if rnd > LIMITS["review_rounds"]:
                 raise Stop("limit_review_rounds",
                            f"reviewer not satisfied after {LIMITS['review_rounds']} rounds")
-            self.agent(REVIEWER, self.msg_review(phase, rnd, context), phase, f"review{rnd}")
-            rv = self.read_json(f"{pd}/review-{rnd}.json")
+            kind = "initial" if not ph.get("obs_round") else f"after build round {ph['obs_round']}"
+            rv = self.reviewed(phase, f"review{rnd}", kind, rnd,
+                               lambda o: self.msg_review(phase, rnd, context, o),
+                               f"{pd}/review-{rnd}.json")
             verdict = rv.get("verdict")
             self.log(f"review round {rnd}: {verdict}")
             if verdict == "approve":
@@ -659,11 +734,11 @@ diff file and {pd}/report.json. End with: REPORT WRITTEN.""")
                                  f"see {self.phase_dir(phase)}/claim-review-*.json]")
                 return rep
             out = f"{self.phase_dir(phase)}/claim-review-{rnd}.json"
-            msg = f"""You are the reviewer of the unit test enabler. Package {self.pkg},
+            msg_t = f"""You are the reviewer of the unit test enabler. Package {self.pkg},
 phase {phase}. The worker did not make a change and claims outcome
 "{rep.get('outcome')}" with this reason:
 
-{rep.get('reason')}
+@@REASON@@
 
 Full report: {self.phase_dir(phase)}/report.json. Master prompt:
 {PROMPT}. Verify the claim independently with read only commands
@@ -674,13 +749,15 @@ as openssl-1_1 or freerdp2), a %check that exists but runs 0 tests or
 is masked, tests that run in Factory but not in a SLE codestream, a
 blocker that a narrow skip would solve.
 
-Write {out} with a bash heredoc, JSON:
+Write @@OUT@@ with a bash heredoc, JSON:
 {{"verdict": "confirm" | "dispute", "summary": "...",
   "findings": [{{"severity": "blocker|major|minor", "where": "...",
                 "problem": "...", "fix": "what the worker must do"}}]}}
 End with: REVIEW WRITTEN."""
-            self.agent(REVIEWER, msg, phase, f"claim{rnd}")
-            rv = self.read_json(out)
+            reason = str(rep.get("reason"))
+            rv = self.reviewed(phase, f"claim{rnd}", "claim", rnd,
+                               lambda o: msg_t.replace("@@OUT@@", o).replace("@@REASON@@", reason),
+                               out)
             self.log(f"claim review {rnd}: {rv.get('verdict')}")
             if rv.get("verdict") != "dispute":
                 rep["claim_confirmed_by_reviewer"] = rv.get("summary")
@@ -905,6 +982,51 @@ End with: REVIEW WRITTEN."""
         ph["outcome"] = "submitted" if SUBMIT[phase] else "dry_run_ready"
         self.save()
         return ph["outcome"]
+
+    # ---------------------------------------------------------------- replay
+    def replay_shadows(self):
+        """Run the shadow reviewers on finished runs, for comparison.
+
+        Only the last review round of each phase is replayed: the checkout
+        in /work matches that round only. The shadow gets the primary's
+        exact prompt, with its own output file.
+        """
+        if not SHADOWS:
+            raise SystemExit("set SHADOW_REVIEWERS")
+        jobs = []
+        for phase in ("factory", "sle"):
+            prompts = sorted(glob.glob(f"{self.rdir}/agent-logs/*-{phase}-*-reviewer.prompt.md"))
+            last = [p for p in prompts if re.search(r"-(review|claim)\d+-reviewer", p)]
+            if not last:
+                continue
+            p = last[-1]
+            step = re.search(r"-(review\d+|claim\d+)-reviewer", p).group(1)
+            kind = "claim-review" if step.startswith("claim") else "review"
+            primary = f"{self.phase_dir(phase)}/{kind}-{re.sub(r'\D', '', step)}.json"
+            msg = open(p).read()
+            if primary not in msg:
+                self.log(f"replay: {p} does not name {primary}; skipped")
+                continue
+            for who in SHADOWS:
+                out = primary.replace(".json", f".{who}.json")
+                if os.path.exists(out):
+                    continue
+                jobs.append((who, msg.replace(primary, out), phase, f"{step}", out))
+        threads = []
+        for who, msg, phase, step, out in jobs:
+            def run(who=who, msg=msg, phase=phase, step=step, out=out):
+                try:
+                    self.agent(who, msg, phase, step, final=True)
+                except Exception as e:
+                    self.log(f"replay {who} {phase}/{step} failed: {e}")
+                self.mark_failed(who, phase, step, out)
+            t = threading.Thread(target=run, daemon=True)
+            t.start()
+            threads.append(t)
+        for t in threads:
+            t.join()
+        self.save()
+        self.log(f"replay: {len(jobs)} shadow review(s) done")
 
     # ---------------------------------------------------------------- learnings
     def learnings(self, outcome, reason):

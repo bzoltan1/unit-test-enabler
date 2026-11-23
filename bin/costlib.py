@@ -68,11 +68,11 @@ def package_costs(rdir, prices):
         pass
     calls, total = [], {"usd": 0.0, "unpriced_tokens": 0, "by_model": {}}
     for f in sorted(glob.glob(os.path.join(rdir, "agent-logs", "*.jsonl"))):
-        m = re.match(r"(\d+)-([a-z]+)-(.+)-(worker|reviewer)\.jsonl$", os.path.basename(f))
+        m = re.match(r"(\d+)-([a-z]+)-(.+)-(worker|reviewer|shadow-[a-z0-9-]+)\.jsonl$", os.path.basename(f))
         if not m:
             continue
         role = m.group(4)
-        model = models[role]
+        model = models.get(role, role)
         t = scan_log(f)
         usd, src = price(model, t, prices)
         calls.append({"call": int(m.group(1)), "phase": m.group(2), "step": m.group(3),
