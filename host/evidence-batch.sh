@@ -40,7 +40,7 @@ while [ "$(date +%s)" -lt "$end" ]; do
   [ "$slots" -lt 0 ] && slots=0
   started=0
   if [ "$slots" -gt 0 ]; then
-    pkgs=$(STATUSES="${STATUSES:-valid weak_reference no_distro_reference}" \
+    pkgs=$(STATUSES="${STATUSES:-valid weak_reference no_distro_reference already_enabled}" \
            "$here/host/evidence-next.sh" "$slots")
     for p in $pkgs; do
       podman container exists "te-evidence-$p" && continue
@@ -48,9 +48,9 @@ while [ "$(date +%s)" -lt "$end" ]; do
       sleep 2
     done
   fi
-  say "running=$running avail=${avail}G cap=$cap started=$started slots=$slots pending=$(STATUSES="${STATUSES:-valid weak_reference no_distro_reference}" "$here/host/evidence-next.sh" 1)"
+  say "running=$running avail=${avail}G cap=$cap started=$started slots=$slots pending=$(STATUSES="${STATUSES:-valid weak_reference no_distro_reference already_enabled}" "$here/host/evidence-next.sh" 1)"
   if [ "$running" -eq 0 ] && [ "$started" -eq 0 ]; then
-    left=$(STATUSES="${STATUSES:-valid weak_reference no_distro_reference}" "$here/host/evidence-next.sh" 1)
+    left=$(STATUSES="${STATUSES:-valid weak_reference no_distro_reference already_enabled}" "$here/host/evidence-next.sh" 1)
     [ -z "$left" ] && { say "no packages left"; break; }
   fi
   sleep 300

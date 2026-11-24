@@ -149,6 +149,9 @@ reason, and the fixed source passes. A second model audits every proven
 case and reruns the key command. Results go to
 `results/evidence/<pkg>/evidence.json`, `report.md` and `logs/`.
 
+It also runs on `already_enabled` packages. There the question is
+historical, whether the tests were off or skipped when the bug shipped.
+
 The verdicts are `PROVEN`, `RECURRENCE_ONLY` (the fix added the test, so
 it prevents a regression but could not have caught the original),
 `NOT_CAUGHT`, `NOT_RUNNABLE`, `NO_UPDATE`, `INCONCLUSIVE` and
