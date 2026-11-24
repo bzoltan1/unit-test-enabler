@@ -291,7 +291,7 @@ and a reason. The summary counts must match the candidates.
   budget is gone.
 - At most 8 local builds per run. If a candidate needs a build you cannot
   afford, record INCONCLUSIVE with the reason, do not guess.
-- Max 4 hours of wall clock. Report what you did not reach.
+- Max 6 hours of wall clock. Report what you did not reach.
 - If the package is already enabled, the tests already run, so the
   interesting question is historical. Still do the analysis and say that
   the tests run today.
