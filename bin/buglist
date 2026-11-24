@@ -1,0 +1,76 @@
+#!/usr/bin/python3
+"""buglist <package> [--fixed] [--non-security] [--ptf] [--limit N] [--json]
+
+Print the cached Bugzilla candidates for a package from the data directory.
+Data: /data/bug_scores.jsonl and /data/bug_details.json (or $ENABLER_DATA).
+"""
+import json
+import os
+import sys
+
+BASE = os.environ.get("ENABLER_DATA") or "/data"
+
+
+def load(pkg):
+    rows = []
+    with open(os.path.join(BASE, "bug_scores.jsonl")) as f:
+        for line in f:
+            try:
+                b = json.loads(line)
+            except ValueError:
+                continue
+            if b.get("package") == pkg:
+                rows.append(b)
+    try:
+        with open(os.path.join(BASE, "bug_details.json")) as f:
+            details = json.load(f)
+    except FileNotFoundError:
+        details = {}
+    for b in rows:
+        d = details.get(str(b.get("bug_id")), {})
+        b["summary"] = d.get("summary", "")
+        b["product"] = b.get("product") or d.get("product", "")
+        b["version"] = d.get("version", "")
+        b["creation_time"] = b.get("creation_time") or d.get("creation_time", "")
+    return rows
+
+
+def main():
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    if not args:
+        sys.exit(__doc__)
+    pkg = args[0]
+    as_json = "--json" in sys.argv
+    limit = 0
+    if "--limit" in sys.argv:
+        limit = int(sys.argv[sys.argv.index("--limit") + 1])
+    rows = load(pkg)
+    if "--fixed" in sys.argv:
+        rows = [b for b in rows if b.get("resolution") == "FIXED"
+                and (b.get("in_changes") or b.get("in_ptf"))]
+    if "--ptf" in sys.argv:
+        rows = [b for b in rows if b.get("in_ptf")]
+    if "--non-security" in sys.argv:
+        rows = [b for b in rows
+                if "Security" not in (b.get("product") or "")
+                and not (b.get("summary") or "").startswith(("VUL-0", "CVE-"))]
+    rows.sort(key=lambda b: b.get("score", 0), reverse=True)
+    if limit:
+        rows = rows[:limit]
+    if as_json:
+        json.dump(rows, sys.stdout, indent=1)
+        print()
+        return
+    print(f"{'id':>10} {'created':10} {'score':>6} {'chg':3} {'ptf':3} "
+          f"{'resolution':10} {'product':28} summary")
+    for b in rows:
+        print(f"{b.get('bug_id'):>10} {(b.get('creation_time') or '')[:10]:10} "
+              f"{b.get('score', 0):6.2f} {'y' if b.get('in_changes') else '-':3} "
+              f"{'y' if b.get('in_ptf') else '-':3} "
+              f"{(b.get('resolution') or '')[:10]:10} "
+              f"{(b.get('product') or '')[:28]:28} {(b.get('summary') or '')[:90]}")
+    print(f"{len(rows)} candidates")
+
+
+if __name__ == "__main__":
+    main()

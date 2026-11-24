@@ -4,7 +4,7 @@
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
 cd "$here"
-cp "$data/ENABLE_TESTS_PROMPT.md" agent/prompts/ENABLE_TESTS_PROMPT.md
+for f in "$data"/*_PROMPT.md; do [ -e "$f" ] && cp "$f" agent/prompts/; done
 rm -f agent/lessons/*.md
 for f in "$data"/LESSONS*.md "$data"/*_learnings.md; do
   [ -e "$f" ] && cp "$f" agent/lessons/

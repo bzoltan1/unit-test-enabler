@@ -128,6 +128,35 @@ Redeploy a package with `podman rm te-<pkg>` and then `host/run.sh <pkg>`.
 The run resumes from `results/<pkg>/state.json`. For a clean restart, also
 run `rm -rf results/<pkg>; podman volume rm te-work-<pkg>`.
 
+## Evidence: did the test prevent a customer bug?
+
+This is a second, separate job. It does not enable tests. It takes a
+package and proves, or disproves, that the unit test we would enable
+would have caught a bug that reached customers.
+
+```bash
+host/evidence-next.sh 5          # next packages with no evidence result
+host/run-evidence.sh gvfs        # one container per package
+host/evidence-status.sh          # overview
+```
+
+The job follows `EVIDENCE_PROMPT.md` in the data directory. For every
+Bugzilla bug with a maintenance update or a PTF it must show the bug,
+the affected version, the fix, the test in the affected tree, and two
+builds: the affected source with the test enabled fails for the bug's
+reason, and the fixed source passes. A second model audits every proven
+case and reruns the key command. Results go to
+`results/evidence/<pkg>/evidence.json`, `report.md` and `logs/`.
+
+The verdicts are `PROVEN`, `RECURRENCE_ONLY` (the fix added the test, so
+it prevents a regression but could not have caught the original),
+`NOT_CAUGHT`, `NOT_RUNNABLE`, `NO_UPDATE`, `INCONCLUSIVE` and
+`NOT_A_CASE`. Nothing is submitted, and the package branches are not
+modified.
+
+`bin/buglist` prints the cached candidates, for example
+`buglist gvfs --fixed --non-security`.
+
 ## Learnings
 
 Every run ends with a learnings step, whatever the outcome:
