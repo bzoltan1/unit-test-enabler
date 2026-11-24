@@ -17,8 +17,8 @@ PROMPT=/opt/enabler/evidence.md
 [ -r "$PROMPT" ] || { echo "missing $PROMPT" >&2; exit 64; }
 
 worker() {
-  local round=$1 msg=$2
-  timeout "${WORKER_SECONDS:-21600}" \
+  local round=$1 msg=$2 t=${3:-${WORKER_SECONDS:-21600}}
+  timeout "$t" \
     opencode run --auto --agent worker --dir /work \
       --title "evidence $pkg r$round" "$msg" \
       > "$out/worker-$round.log" 2>&1
@@ -40,11 +40,39 @@ anything and do not modify the package branches. The bar is a reproducible
 experiment: the test exists in the affected tree, fails on the affected source
 for the bug's reason, and passes with the fix. End with EVIDENCE DONE."
 
+start=$(date +%s)
 worker 1 "$first"
 if [ ! -s "$out/evidence.json" ]; then
   echo "no evidence.json after the worker" >&2
   echo "INCOMPLETE" > "$out/status"
   exit 1
+fi
+
+# A worker that ends with time left and a non-empty not_reached has skipped
+# candidates. Give it one more session with the remaining clock.
+nr=$(python3 - "$out" <<'PY'
+import json, os, sys
+try:
+    d = json.load(open(os.path.join(sys.argv[1], "evidence.json")))
+    print(len(d.get("not_reached") or []))
+except Exception:
+    print(0)
+PY
+)
+elapsed=$(( $(date +%s) - start ))
+remaining=$(( ${WORKER_SECONDS:-21600} - elapsed ))
+if [ "$nr" -gt 0 ] && [ "$remaining" -gt 900 ]; then
+  echo "worker left $nr candidates in not_reached, $remaining s of budget left: second worker round"
+  worker 2 "You left $nr candidate ids in $out/evidence.json under not_reached.
+Load the file and triage every one of them. not_reached is only for the clock
+or the build budget running out. A security bug with no test fixture is
+NOT_A_CASE or NO_TEST in one line. Do not duplicate entries. Update
+evidence.json and report.md. End with EVIDENCE DONE." "$remaining"
+  if [ ! -s "$out/evidence.json" ]; then
+    echo "no evidence.json after the second worker round" >&2
+    echo "INCOMPLETE" > "$out/status"
+    exit 1
+  fi
 fi
 
 for round in 1 2; do

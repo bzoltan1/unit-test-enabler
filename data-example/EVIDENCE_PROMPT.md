@@ -98,6 +98,12 @@ One verdict per candidate. Use exactly these strings.
 `NOT_REACHED` is not a verdict. Candidates you did not get to go into
 `not_reached` with their ids, and their count goes into the summary.
 
+`not_reached` is only for the clock or the build budget running out. It
+is not a place for candidates you chose not to look at. A security bug
+with no test fixture is `NOT_A_CASE` or `NO_TEST` in one line, not
+`not_reached`. Ending with time left and a non-empty `not_reached` is a
+failed run.
+
 ## The bar for PROVEN
 
 All of these, each with its citation in `evidence.json`.
@@ -553,6 +559,7 @@ harness rewrites `summary` from the verdicts alone and drops
 - The test is in the same package or subsystem, but there is no call
   chain from the test to the changed function.
 - The bug summary says crash or parse and some test parses something.
+- A candidate sits in `not_reached` while the clock still has time.
 - A build was started before the gate record was written.
 - The test was added or changed by the fix, or by you.
 - The test is skipped by the enablement change, or needs network, root,
@@ -580,4 +587,6 @@ harness rewrites `summary` from the verdicts alone and drops
 - Start with the strongest candidate (passed G1 to G6, has a mechanism,
   `blocked_release`). Prove or kill it end to end before the next.
 - If time runs out, put the untriaged ids in `not_reached`. Never drop a
-  candidate silently.
+  candidate silently. If you still have more than 30 minutes, do not
+  end with `not_reached` non-empty: triage the remaining ids, the quick
+  rejects first.
