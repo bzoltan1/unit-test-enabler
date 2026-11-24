@@ -278,6 +278,16 @@ def main():
             out.append({"url": plan, "package": pkg, "phase": phase, "verdict": "PLAN",
                         "state": "not submitted",
                         "why": "dry run: submit it from the plan (or rerun with SUBMIT_SLE=1)"})
+    # A dry-run plan is easier to read with the state of the other part.
+    for r in out:
+        if r["verdict"] != "PLAN":
+            continue
+        sib = [x for x in out if x["package"] == r["package"] and x["url"] != r["url"]
+               and x.get("kind") in ("request", "pr")]
+        if sib:
+            r["why"] += " Other part: " + "; ".join(
+                f"{x['verdict'].lower()} {x['url']}" for x in sib)
+
     if "--landed" in sys.argv:
         out = [r for r in out if r["verdict"] == "LANDED"]
     if "--open" in sys.argv:
