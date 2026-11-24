@@ -30,9 +30,21 @@ while [ "$(date +%s)" -lt "$end" ]; do
     echo $(( a + 1 )) > "$att/$p"
   done
 
+  # drop the container and the volume of finished runs, keep the results
+  for c in $(podman ps -a --filter label=evidence=1 --filter status=exited --format '{{.Names}}'); do
+    p=${c#te-evidence-}
+    if [ -s "$here/results/evidence/$p/evidence.json" ]; then
+      podman rm "$c" >/dev/null 2>&1
+      podman volume rm "te-evidence-$p" >/dev/null 2>&1
+      say "cleaned $c"
+    fi
+  done
+
   running=$(podman ps --filter label=evidence=1 --format '{{.Names}}' | wc -l)
   avail=$(awk '/MemAvailable/{print int($2/1048576)}' /proc/meminfo)
+  free_g=$(df -BG --output=avail / | tail -1 | tr -dc 0-9)
   cap=$conc
+  [ "$free_g" -lt 40 ] && cap=0
   [ "$avail" -lt 20 ] && cap=$(( conc / 2 ))
   [ "$avail" -lt 12 ] && cap=0
   [ "$cap" -lt 0 ] && cap=0
@@ -48,7 +60,7 @@ while [ "$(date +%s)" -lt "$end" ]; do
       sleep 2
     done
   fi
-  say "running=$running avail=${avail}G cap=$cap started=$started slots=$slots pending=$(STATUSES="${STATUSES:-valid weak_reference no_distro_reference already_enabled}" "$here/host/evidence-next.sh" 1)"
+  say "running=$running avail=${avail}G free=${free_g}G cap=$cap started=$started slots=$slots pending=$(STATUSES="${STATUSES:-valid weak_reference no_distro_reference already_enabled}" "$here/host/evidence-next.sh" 1)"
   if [ "$running" -eq 0 ] && [ "$started" -eq 0 ]; then
     left=$(STATUSES="${STATUSES:-valid weak_reference no_distro_reference already_enabled}" "$here/host/evidence-next.sh" 1)
     [ -z "$left" ] && { say "no packages left"; break; }
