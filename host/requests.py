@@ -4,6 +4,9 @@
   host/requests.py                 every request/PR from results/*/*/report.json
   host/requests.py gvfs dovecot    only these packages
   host/requests.py --open          hide landed and closed ones
+  host/requests.py --landed        only accepted and merged ones
+The list also includes the request and PR links found in progress.md, so
+manual and hand-made work shows up too.
   host/requests.py --json          machine-readable
 
 For an OBS/IBS submit or maintenance request: state, every review (user,
@@ -213,6 +216,22 @@ def gitea_pr(url):
             "verdict": verdict, "why": why}
 
 
+def ledger_urls():
+    """Requests and PRs mentioned in progress.md (manual and hand-made work)."""
+    data = E.get("ENABLER_DATA")
+    path = os.path.join(data, "progress.md") if data else None
+    out = []
+    if path and os.path.exists(path):
+        for line in open(path, errors="replace"):
+            if not line.startswith("|"):
+                continue
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            pkg = cells[0] if cells else "?"
+            for u in re.findall(r"https?://\S+?(?:request/show|pulls)/\d+", line):
+                out.append((pkg, "-", u.rstrip(".,;)")))
+    return out
+
+
 def collect(pkgs):
     items = []
     for rep in sorted(glob.glob(f"{RES}/*/*/report.json")):
@@ -230,8 +249,15 @@ def collect(pkgs):
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    want = set(args)
     out = []
-    for pkg, phase, url in collect(set(args)):
+    seen = set()
+    items = collect(want) + [(p, ph, u) for p, ph, u in ledger_urls()
+                             if not want or p in want]
+    for pkg, phase, url in items:
+        if url in seen:
+            continue
+        seen.add(url)
         try:
             if "/request/show/" in url:
                 r = obs_request(url)
@@ -252,6 +278,8 @@ def main():
             out.append({"url": plan, "package": pkg, "phase": phase, "verdict": "PLAN",
                         "state": "not submitted",
                         "why": "dry run: submit it from the plan (or rerun with SUBMIT_SLE=1)"})
+    if "--landed" in sys.argv:
+        out = [r for r in out if r["verdict"] == "LANDED"]
     if "--open" in sys.argv:
         out = [r for r in out if r["verdict"] not in ("LANDED", "CLOSED")]
     if "--json" in sys.argv:

@@ -188,6 +188,7 @@ host/costs.py --csv
 ```bash
 host/requests.sh             # every request/PR the agents created; also results/REQUESTS.md
 host/requests.sh --open      # hide landed and closed ones
+host/requests.sh --landed    # only accepted and merged ones
 host/requests.sh gvfs --json
 ```
 
@@ -198,6 +199,8 @@ host/requests.sh gvfs --json
 - For Gitea PRs it shows the state, merge, WIP, requested reviewers,
   reviews (approved or changes requested), comments and the commit
   status (CI, staging bot).
+- It also reads the request and PR links from `progress.md`, so manual
+  and hand-made work shows up as well.
 
 Each item gets one of these labels:
 
