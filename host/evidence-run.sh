@@ -9,6 +9,9 @@ out=/results/evidence/$pkg
 mkdir -p "$out/logs" "$out/patches"
 export ENABLER_PHASE_DIR=$out
 cd /work || exit 1
+if [ -r /opt/enabler/agent/AGENTS_EVIDENCE.md ]; then
+  cp /opt/enabler/agent/AGENTS_EVIDENCE.md ~/.config/opencode/AGENTS.md
+fi
 
 PROMPT=/opt/enabler/evidence.md
 [ -r "$PROMPT" ] || { echo "missing $PROMPT" >&2; exit 64; }
@@ -46,10 +49,11 @@ fi
 
 for round in 1 2; do
   reviewer "$round" "Read $PROMPT and audit $out/evidence.json and $out/report.md.
-For every PROVEN case, verify the test exists in the affected tree, read the
-affected and fixed logs, and rerun at least one command if you can. Write
-$out/review.json with one verdict per case, confirmed, rejected or needs_more,
-and end with AUDIT DONE."
+Follow the Review section exactly. For every PROVEN case, verify the test
+exists in the affected tree, read the affected and fixed logs, and rerun at
+least one command if you can. Write $out/review.json with the exact schema in
+the prompt, top level key cases, one verdict per case, confirmed, rejected or
+needs_more. Update /results/evidence/LEDGER.md under flock. End with AUDIT DONE."
   rejected=$(python3 - "$out" <<'PY'
 import json, os, sys
 d = sys.argv[1]
@@ -57,7 +61,8 @@ try:
     r = json.load(open(os.path.join(d, "review.json")))
 except Exception:
     print("1"); raise SystemExit
-bad = [c for c in r.get("cases", []) if c.get("verdict") in ("rejected", "needs_more")]
+cases = r.get("cases") or r.get("case_verdicts") or [] if isinstance(r, dict) else r
+bad = [c for c in cases if c.get("verdict") in ("rejected", "needs_more")]
 print(len(bad))
 PY
 )
@@ -77,7 +82,9 @@ d = sys.argv[1]
 ev = json.load(open(os.path.join(d, "evidence.json")))
 rv = {}
 try:
-    rv = {c.get("bug"): c.get("verdict") for c in json.load(open(os.path.join(d, "review.json"))).get("cases", [])}
+    r = json.load(open(os.path.join(d, "review.json")))
+    cases = r.get("cases") or r.get("case_verdicts") or [] if isinstance(r, dict) else r
+    rv = {c.get("bug"): c.get("verdict") for c in cases}
 except Exception:
     pass
 for c in ev.get("candidates", []):
