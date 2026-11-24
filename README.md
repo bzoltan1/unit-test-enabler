@@ -23,7 +23,9 @@ it unattended:
 3. Publish. The worker commits to the home branch (OBS), or pushes to a
    fork and opens a "WIP:" PR (git workflow).
 4. Observe. The orchestrator polls the OBS builds and compares them with
-   the devel project. For new failures, the worker reads every failed
+   the devel project. It only waits for targets the devel builds, gives up
+   on blocked or churning ones after a grace, and reports the rest as
+   pending. For new failures, the worker reads every failed
    log, fixes the cause, gets the fix reviewed and pushes again.
 5. Submit. Once the builds are green, the worker creates the SR (or
    removes the WIP prefix) and records the OBS test counts.
@@ -296,7 +298,9 @@ changes. Their providers must be in `OPENCODE_CONFIG`; rerun
 | SHADOW_MAX_STEPS / REVIEWER_MAX_STEPS | 120 / 200 | tool steps before a final answer is forced |
 | MODEL_LIMITS | empty | `provider/model=context:output` for models without limits in the opencode config |
 | COST_LIMIT_USD | 0 (none) | stop a package when its priced model cost exceeds this |
-| PENDING_GRACE_HOURS | 6 | stop waiting for builds stuck in scheduled/blocked (s390x) |
+| BUILD_WAIT_HOURS | 6 | end the build observation after this, report the rest as pending |
+| TARGET_GRACE_HOURS | 3 | give up on one target that is not final after this |
+| BUILD_CHURN_LIMIT | 3 | give up on a target that rebuilds this often with unchanged sources |
 | CPUS / MEMORY | unset | cgroup limits (need delegated cgroup controllers) |
 | STATUSES (next-packages.sh) | valid weak_reference | which list rows to pick |
 

@@ -63,11 +63,15 @@ SHADOWS = {shadow_name(m.strip()): m.strip()
 PRICES = "/opt/enabler/prices.json"
 POLL_SECONDS = int(E.get("POLL_SECONDS", 600))
 PENDING_GRACE_HOURS = float(E.get("PENDING_GRACE_HOURS", 6))
+BUILD_WAIT_HOURS = float(E.get("BUILD_WAIT_HOURS", 6))
+TARGET_GRACE_HOURS = float(E.get("TARGET_GRACE_HOURS", 3))
+CHURN_LIMIT = int(E.get("BUILD_CHURN_LIMIT", 3))
 WORKER_TIMEOUT = int(E.get("WORKER_TIMEOUT", 5 * 3600))
 REVIEWER_TIMEOUT = int(E.get("REVIEWER_TIMEOUT", 2 * 3600))
 
 FINAL_CODES = {"succeeded", "failed", "unresolvable", "broken", "disabled",
                "excluded", "locked"}
+PROBLEM_CODES = {"failed", "unresolvable", "broken", "disabled", "excluded"}
 BAD_CODES = {"failed", "unresolvable", "broken"}
 WAIT_CODES = {"scheduled", "blocked"}
 
@@ -297,6 +301,10 @@ class Run:
             for k in ("diff_file", "changes_entry", "request_message", "test_history", "targets"):
                 if not rep.get(k):
                     problems.append(f"'{k}' is missing")
+            if not rep.get("pushback"):
+                problems.append("'pushback' is missing. Read the package's past requests "
+                                "and their review comments and list the concerns a "
+                                "maintainer may have, with evidence and an answer.")
             df = rep.get("diff_file")
             if df and not os.path.exists(df):
                 problems.append(f"diff_file {df} does not exist")
@@ -401,6 +409,9 @@ time). Fields:
   "baseline_targets": [{{"api": "...", "project": "devel or update project",
                         "package": "..."}}],
   "no_build_reason": "only when no OBS/IBS project builds the change (git change without a PR in dry run)",
+  "pushback": [{{"concern": "what a maintainer may object to",
+                "evidence": "measurement or reference",
+                "answer": "how the change or the message answers it"}}],
   "requests": ["request or PR URLs you created"],
   "obs_test_counts": [{{"target": "repo/arch", "tests_passed": N, "log": "how you read it"}}],
   "unrelated_failures": [{{"repo": "", "arch": "", "evidence": ""}}],
@@ -433,9 +444,10 @@ src.opensuse.org git workflow). Do not touch IBS or {IBS_GITEA} yet,
 except read only (to check history and existing work).
 """
         return self.common_header(phase) + extra + f"""
-Do steps 2 to 7 of the master prompt for this phase, up to and
+Do steps 2 to 9 of the master prompt for this phase, up to and
 including the local gate (green local build with %check, tests
-counted from the log, spec-cleaner, source_validator, changes lint).
+counted from the log, spec-cleaner, source_validator, changes lint)
+and the draft request. The pushback analysis in step 8 is required.
 Branch with `osc branch` (or fork for git) but DO NOT `osc ci` or
 `git push` yet: the reviewer must approve first.
 
@@ -632,7 +644,12 @@ Check at least:
    %check is newer than the last change to the spec, patches and
    sources in the checkout (compare mtimes with ls -l
    --time-style=full-iso). Text-only .changes edits after it are fine.
-8. Anything that would make a maintainer decline the request.
+8. The pushback analysis. The report lists the concerns a maintainer
+   may have, each with evidence and an answer. Check the package's past
+   requests and pull request comments yourself and list concerns the
+   worker missed. The request message answers the top ones in one or
+   two short sentences.
+9. Anything that would make a maintainer decline the request.
 
 Verdicts: "approve" (only minor issues or nits left, they go into
 findings), "changes_requested" (blocker or major issues), or
@@ -720,7 +737,7 @@ No new request yet (that happens in the finalize step). Update the
 report.
 End with: REPORT WRITTEN."""
 
-    def msg_finalize(self, phase, results_txt):
+    def msg_finalize(self, phase, results_txt, coverage=""):
         pd = self.phase_dir(phase)
         submit = SUBMIT[phase]
         fr = self.read_json(f"{self.rdir}/factory/report.json") if phase == "sle" else {}
@@ -751,7 +768,13 @@ verified counts and the Factory reference). A human will run it."""
    Fill obs_test_counts in the report.
 2. {act}
 3. Put every request/PR URL into requests and rewrite
-   {pd}/report.json. End with: REPORT WRITTEN."""
+   {pd}/report.json. End with: REPORT WRITTEN.
+
+Target coverage:
+{coverage or "  all targets the devel project builds are final"}
+If a target is out of scope or still pending, say so in one or two short
+sentences in the request message, with the reason. A maintainer should not
+discover a missing target on their own."""
 
     # ---------------------------------------------------------------- review
     def review_loop(self, phase, context, rounds_key="review_round"):
@@ -862,6 +885,19 @@ of tool steps you can only reply in text). End with: REVIEW WRITTEN."""
             r["api"], r["project"] = t["api"], t["project"]
         return rows
 
+    def srcmd5(self, api, prj, pkg):
+        """Current source revision of a package, or None on error."""
+        import xml.etree.ElementTree as ET
+        try:
+            x = subprocess.run(["osc", "-A", api, "api",
+                                f"/source/{prj}/{pkg}?expand=1"],
+                               capture_output=True, text=True, timeout=120)
+            if x.returncode != 0:
+                return None
+            return ET.fromstring(x.stdout).get("srcmd5")
+        except Exception:
+            return None
+
     def stale(self, rows):
         """Rows whose last build job is not of the current sources.
 
@@ -869,41 +905,71 @@ of tool steps you can only reply in text). End with: REVIEW WRITTEN."""
         minutes before OBS marks the package dirty after a commit.
         """
         import xml.etree.ElementTree as ET
-        cur, out = {}, []
+        out = []
         for r in rows:
-            if r["code"] not in FINAL_CODES or r["code"] in ("disabled", "excluded", "locked"):
+            if r["code"] not in ("succeeded", "failed"):
                 continue
             base = r["package"].split(":")[0]
-            key = (r["api"], r["project"], base)
+            cur = self.srcmd5(r["api"], r["project"], base)
+            if not cur:
+                continue
             try:
-                if key not in cur:
-                    x = subprocess.run(["osc", "-A", r["api"], "api",
-                                        f"/source/{r['project']}/{base}?expand=1"],
-                                       capture_output=True, text=True, timeout=120)
-                    cur[key] = ET.fromstring(x.stdout).get("srcmd5") if x.returncode == 0 else None
-                if not cur[key]:
-                    continue
                 x = subprocess.run(["osc", "-A", r["api"], "api",
                                     f"/build/{r['project']}/{r['repo']}/{r['arch']}/_jobhistory"
-                                    f"?package={r['package']}&limit=1"],
+                                    f"?package={r['package']}"],
                                    capture_output=True, text=True, timeout=120)
                 if x.returncode != 0:
                     continue
                 jobs = ET.fromstring(x.stdout).findall("jobhist")
-                if jobs and jobs[-1].get("srcmd5") and jobs[-1].get("srcmd5") != cur[key] \
-                        and r["code"] in ("succeeded", "failed"):
+                if jobs and jobs[-1].get("srcmd5") and jobs[-1].get("srcmd5") != cur:
                     out.append(r)
             except Exception as e:
                 self.log(f"stale check skipped for {r['repo']}/{r['arch']}: {e}")
         return out
 
+    def baseline_codes(self, rep):
+        """What the devel project does on the same repo/arch, per (repo, arch)."""
+        base = {}
+        for t in rep.get("baseline_targets") or []:
+            try:
+                for r in self.fetch(t):
+                    base[(r["repo"], r["arch"])] = r["code"]
+            except Exception as e:
+                self.log(f"baseline fetch failed for {t}: {e}")
+        return base
+
     def wait_builds(self, phase, rep):
+        """Wait for the in-scope targets, not for every inherited one.
+
+        A target is out of scope when the devel project does not build it at
+        all, or builds it as disabled, blocked, unresolvable or failed. The
+        branch then has no business waiting for it.
+
+        A target is given up when it is not final after TARGET_GRACE_HOURS,
+        or when it rebuilds BUILD_CHURN_LIMIT times with unchanged sources.
+        After BUILD_WAIT_HOURS the whole wait ends and whatever is still
+        building is reported as pending.
+        """
         targets = rep.get("build_targets") or []
         if not targets:
             raise Stop("error_report", "no build_targets in the report after publish")
+        base = self.baseline_codes(rep)
         self.log(f"waiting for builds: {targets}")
-        time.sleep(min(POLL_SECONDS, 300))
-        waiting_since = None
+        self.log(f"baseline codes: {len(base)} repo/arch entries")
+
+        def out_of_scope(r):
+            if not base:
+                return False
+            code = base.get((r["repo"], r["arch"]))
+            return code is None or code in ("disabled", "excluded", "blocked",
+                                            "unresolvable", "broken", "failed")
+
+        started = now()
+        last_final = {}
+        churn = {}
+        src = {}
+        waiting_since = {}
+        give_up = set()
         stale_since = None
         while True:
             self.check_deadline()
@@ -913,46 +979,81 @@ of tool steps you can only reply in text). End with: REVIEW WRITTEN."""
                 self.log(f"poll error: {e}")
                 time.sleep(POLL_SECONDS)
                 continue
-            active = [r for r in rows if r["code"] not in FINAL_CODES or r["dirty"]]
-            if rows and not active:
-                st = self.stale(rows)
+            out = [r for r in rows if out_of_scope(r)]
+            scope = [r for r in rows if not out_of_scope(r)]
+            active = []
+            for r in scope:
+                key = (r["repo"], r["arch"])
+                final = r["code"] in FINAL_CODES and not r["dirty"]
+                if final:
+                    last_final[key] = r
+                    waiting_since.pop(key, None)
+                    continue
+                if key in last_final:
+                    base_pkg = r["package"].split(":")[0]
+                    cur = self.srcmd5(r["api"], r["project"], base_pkg)
+                    old = src.setdefault(key, cur)
+                    if cur and old and cur != old:
+                        self.log(f"{key}: sources changed, churn reset")
+                        churn[key] = 0
+                        src[key] = cur
+                    else:
+                        churn[key] = churn.get(key, 0) + 1
+                        self.log(f"{key}: rebuilt with unchanged sources "
+                                 f"({churn[key]}/{CHURN_LIMIT})")
+                        if churn[key] >= CHURN_LIMIT:
+                            give_up.add(key)
+                    last_final.pop(key, None)
+                waiting_since.setdefault(key, now())
+                if key in give_up:
+                    continue
+                if (now() - waiting_since[key]).total_seconds() > TARGET_GRACE_HOURS * 3600:
+                    self.log(f"giving up on {key} after {TARGET_GRACE_HOURS}h without a final result")
+                    give_up.add(key)
+                    continue
+                active.append(r)
+            pending = [r for r in scope
+                       if (r["repo"], r["arch"]) in give_up
+                       and not (r["code"] in FINAL_CODES and not r["dirty"])]
+            if not active:
+                st = [r for r in self.stale(scope) if not out_of_scope(r)]
                 if st:
                     stale_since = stale_since or now()
                     if (now() - stale_since).total_seconds() < 2 * 3600:
                         self.log(f"{len(st)} results are from older sources; waiting")
-                        active = st
-                    else:
-                        self.log("stale-source check still differs after 2h; ignoring it")
-            only_waiting = active and all(r["code"] in WAIT_CODES and not r["dirty"] for r in active)
-            if rows and not active:
-                return rows, []
-            if only_waiting:
-                waiting_since = waiting_since or now()
-                if (now() - waiting_since).total_seconds() > PENDING_GRACE_HOURS * 3600:
-                    self.log(f"giving up waiting for {len(active)} scheduled/blocked builds")
-                    return rows, active
-            else:
-                waiting_since = None
-            self.log(f"builds: {len(rows) - len(active)}/{len(rows)} final")
+                        time.sleep(POLL_SECONDS)
+                        continue
+                    self.log("stale-source check still differs after 2h, ignoring it")
+                done = [r for r in scope if r["code"] in FINAL_CODES and not r["dirty"]]
+                self.log(f"wait done: {len(done)} green/final, {len(pending)} given up, "
+                         f"{len(out)} out of scope")
+                return rows, pending, out
+            if (now() - started).total_seconds() > BUILD_WAIT_HOURS * 3600:
+                self.log(f"build wait limit reached after {BUILD_WAIT_HOURS}h, "
+                         f"{len(active)} still building")
+                return rows, pending + active, out
+            self.log(f"builds: {len(scope) - len(active) - len(pending)}/{len(scope)} in scope final, "
+                     f"{len(pending)} given up, {len(out)} out of scope")
             time.sleep(POLL_SECONDS)
 
-    def classify(self, phase, rep, rows):
-        base = {}
-        for t in rep.get("baseline_targets") or []:
-            try:
-                for r in self.fetch(t):
-                    base[(r["repo"], r["arch"])] = r["code"]
-            except Exception as e:
-                self.log(f"baseline fetch failed for {t}: {e}")
+    def classify(self, phase, rep, rows, out=(), pending=()):
+        """Split real failures from pre-existing ones and out-of-scope targets."""
+        base = self.baseline_codes(rep)
         ignored = {(x["repo"], x["arch"]) for x in self.ph(phase)["ignored_failures"]}
+        skip = {(r["repo"], r["arch"]) for r in list(out) + list(pending)}
         new, pre = [], []
         for r in rows:
-            if r["code"] not in BAD_CODES:
+            key = (r["repo"], r["arch"])
+            if key in skip:
                 continue
-            if (r["repo"], r["arch"]) in ignored:
+            if r["code"] not in PROBLEM_CODES:
+                continue
+            if key in ignored:
                 pre.append(r)
-            elif base.get((r["repo"], r["arch"])) in BAD_CODES | {"disabled", "excluded"}:
-                # The devel project does not build here, or fails already.
+            elif key not in base:
+                # The devel does not build this repo/arch at all.
+                pre.append(r)
+            elif base.get(key) in PROBLEM_CODES | {"disabled", "excluded"}:
                 pre.append(r)
             else:
                 new.append(r)
@@ -1008,12 +1109,16 @@ of tool steps you can only reply in text). End with: REVIEW WRITTEN."""
                 if (rep.get("workflow") == "git" and not SUBMIT[phase]) or rep.get("no_build_reason"):
                     self.log(f"no build project: {rep.get('no_build_reason') or 'git dry run, no PR'}")
                     break
-            rows, pending = self.wait_builds(phase, rep)
-            new, pre = self.classify(phase, rep, rows)
+            rows, pending, out = self.wait_builds(phase, rep)
+            new, pre = self.classify(phase, rep, rows, out, pending)
+            ph["out_of_scope"] = [f"{r['repo']}/{r['arch']}:{r['code']} (devel: "
+                                  f"{self.baseline_codes(rep).get((r['repo'], r['arch']), 'not built')})"
+                                  for r in out] if out else []
             self.log(f"build result: {len(new)} new failures, {len(pre)} pre-existing, "
                      f"{len(pending)} still pending")
             if not new:
-                ph["pending_at_end"] = [f"{r['repo']}/{r['arch']}" for r in pending]
+                ph["pending_at_end"] = [f"{r['repo']}/{r['arch']}:{r['code']}" for r in pending]
+                self.save()
                 self.mark(phase, "builds_green")
                 break
             ph["obs_round"] += 1
@@ -1048,7 +1153,16 @@ of tool steps you can only reply in text). End with: REVIEW WRITTEN."""
         if not self.done(phase, "finalize"):
             if SUBMIT[phase]:
                 self.gate(f"submit_{phase}")
-            self.worker(phase, "finalize", self.msg_finalize(phase, self.table(rows) or "  (none)"))
+            cov = []
+            if ph.get("out_of_scope"):
+                cov.append("Out of scope, the devel project does not build these:")
+                cov += ["  " + x for x in ph["out_of_scope"]]
+            if ph.get("pending_at_end"):
+                cov.append("Still building or queued at the end:")
+                cov += ["  " + x for x in ph["pending_at_end"]]
+            self.worker(phase, "finalize",
+                        self.msg_finalize(phase, self.table(rows) or "  (none)",
+                                          "\n".join(cov)))
             self.close_all_gates()
             rep = self.get_report(phase, "finalize", "Finalize and list the requests.")
             if SUBMIT[phase] and not rep.get("requests"):

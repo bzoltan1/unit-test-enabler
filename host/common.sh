@@ -6,7 +6,7 @@ if [ ! -r "$conf" ]; then
   exit 64
 fi
 # Variables set in the environment win over enabler.conf for these.
-_override=(SHADOW_REVIEWERS WORKER_MODEL REVIEWER_MODEL MODEL_LIMITS SHADOW_MAX_STEPS)
+_override=(SHADOW_REVIEWERS WORKER_MODEL REVIEWER_MODEL MODEL_LIMITS SHADOW_MAX_STEPS BUILD_WAIT_HOURS TARGET_GRACE_HOURS BUILD_CHURN_LIMIT)
 declare -A _env
 for v in "${_override[@]}"; do [ -n "${!v+x}" ] && _env[$v]=${!v}; done
 set -a
@@ -24,6 +24,8 @@ ENV_ARGS=(-e OBS_USER="$OBS_USER" -e GIT_NAME="$GIT_NAME" -e GIT_EMAIL="$GIT_EMA
           -e OBS_TEA_LOGIN="$OBS_TEA_LOGIN" -e WORKER_MODEL="$WORKER_MODEL"
           -e REVIEWER_MODEL="$REVIEWER_MODEL" -e BUGZILLA_URL="${BUGZILLA_URL:-https://bugzilla.suse.com}"
           -e SHADOW_REVIEWERS="${SHADOW_REVIEWERS:-}" -e MODEL_LIMITS="${MODEL_LIMITS:-}"
+          -e BUILD_WAIT_HOURS="${BUILD_WAIT_HOURS:-6}" -e TARGET_GRACE_HOURS="${TARGET_GRACE_HOURS:-3}"
+          -e BUILD_CHURN_LIMIT="${BUILD_CHURN_LIMIT:-3}"
           -e SHADOW_MAX_STEPS="${SHADOW_MAX_STEPS:-120}" -e REVIEWER_MAX_STEPS="${REVIEWER_MAX_STEPS:-200}")
 data=$ENABLER_DATA
 

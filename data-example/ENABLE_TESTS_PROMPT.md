@@ -297,7 +297,39 @@ repositories.
      the tests actually ran (not "0 tests").
    - If a test fails, find the root cause before skipping it. A real
      product bug gets a Bugzilla report, not a silent skip.
-8. **Draft the request.**
+8. **Anticipate the maintainers.** Before you write the request, ask
+   why the maintainers may push back, and answer it in the change and
+   in the request message.
+   - Read the package's request and pull request history. List the
+     accepted, declined, revoked and superseded requests for the
+     package and its devel project (`osc rq list -s all -P <prj> -p
+     <pkg>`, the build service search API, and the PR list on the
+     Gitea repo). For every declined or revoked one, read the review
+     comments and the decline reason. Do the same for the review
+     comments on accepted requests.
+   - Read the maintainers' comments in the bug tracker for this
+     package, and the recent `.changes` entries, to see what they care
+     about.
+   - Write down the concerns a maintainer could have about this
+     change. The usual ones are build time and build service load, the
+     build matrix and targets the devel project does not build, test
+     relevance and what regression the tests actually prevent,
+     flakiness, a missing bug or CVE reference, security and signing,
+     scope creep, style, and "why now". Add any concern specific to
+     this package or these maintainers.
+   - For each concern write the evidence and the answer. Measure what
+     can be measured. For build cost, compare the `%check` time with
+     the same target without it. For flakiness, count the repeated
+     builds of the same target and their results. State that test
+     binaries do not change the shipped RPM, which code paths the
+     tests cover in this package, and which targets are out of scope
+     because the devel project does not build them.
+   - If a past request was declined for a reason that still applies,
+     stop and report it instead of resubmitting.
+   - Put the concerns and answers in the report as `pushback`. The
+     request message answers the top ones in one or two short
+     sentences, not as a defensive list.
+9. **Draft the request.**
    - Write the SR message in the reference style: 1 to 3 short
      paragraphs saying what changed and why, the skips with reasons,
      the new deps, and "<targets/archs> build and pass N tests".
@@ -317,18 +349,18 @@ repositories.
    - Phase B: use `osc mbranch` / `osc maintenancerequest`, which
      produces a `maintenance_incident` like 437785. Add the Factory
      SR URL to the message.
-9. **Record the result** in `$ENABLER_DATA/progress.md`
+10. **Record the result** in `$ENABLER_DATA/progress.md`
    as one row per package: package | rank | test history (never
    enabled / disabled on date for reason, still valid?) | Factory SR |
    Factory status | SLE codestream(s) | SLE MR URL(s) | @IBS_GITEA@ PR
    | tests passed (TW / SLE) | skips | notes. Packages you skip (already done,
    can't be done, would need upstream changes) also get a row with the
    reason.
-10. **Finish both phases.** A package counts as done only when both
+11. **Finish both phases.** A package counts as done only when both
    Phase A and Phase B are submitted. If Phase B is waiting for the
    Factory review, mark it `waiting-factory` in `progress.md` and
    come back to it.
-11. **Move on** to the next package only after I confirm.
+12. **Move on** to the next package only after I confirm.
 
 ## Rules
 - One package at a time. No batch submissions.
