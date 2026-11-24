@@ -102,4 +102,6 @@ ev["summary"].update({k.lower(): v for k, v in counts.items()})
 json.dump(ev, open(os.path.join(d, "evidence.json"), "w"), indent=1)
 print(json.dumps(ev["summary"]))
 PY
+# The build root is a 20 GB VM disk; the logs and checkouts stay.
+rm -rf /work/buildroot
 echo "DONE" > "$out/status"

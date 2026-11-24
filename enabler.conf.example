@@ -81,6 +81,10 @@ REVIEWER_MAX_STEPS=200
 BUILD_WAIT_HOURS=6
 TARGET_GRACE_HOURS=3
 BUILD_CHURN_LIMIT=3
+# Host-wide cap on concurrent KVM builds across all containers. The agents
+# can run many; builds queue for a slot. 2 or 3 is right for a 16 core,
+# 58 GB host. 0 disables the cap.
+BUILD_SLOTS=2
 # Context and output limits for models your opencode config does not
 # describe: provider/model=context:output, comma-separated. Set context
 # below the backend's hard limit so opencode compacts before a large read

@@ -86,7 +86,8 @@ Host:
 | podman | rootless, 4.3 or newer (`--userns=keep-id:uid=`); tested with 6.0.2 |
 | KVM | `/dev/kvm` readable and writable by the user (kvm group); no privileged container |
 | CPU | 4 per parallel container (`BUILD_JOBS`, default 4) |
-| RAM | `BUILD_MEMORY` (default 8 GB) + about 2 GB per parallel container. With 58 GB, 3 to 4 parallel at 6144 MB is safe |
+| RAM | `BUILD_MEMORY` (default 8 GB) plus about 1.5 GB for the agent, per container that is building. `BUILD_SLOTS` (default 2) caps concurrent builds across all containers on the host, so you can run more agents than build slots. With 58 GB, 3 concurrent builds at 8 GB is the safe peak |
+| CPU | `BUILD_SLOTS` × `BUILD_JOBS` should stay at or below the core count. 3 slots at 4 jobs fits 16 cores |
 | disk | 3.4 GB image + up to `BUILD_DISK_MB` (default 20 GB) + a few GB of package cache and checkouts per running container. Build roots are removed when a run ends |
 | tools | python3, curl, ssh-keygen (setup checks) |
 | network | api.opensuse.org, src.opensuse.org, registry.opensuse.org, github.com (opencode release), the model endpoints, Bugzilla, and the internal hosts in `enabler.conf` (`IBS_API`, `IBS_GITEA`, `INTERNAL_CA_REPO`), which usually need the company network or VPN |
@@ -325,6 +326,7 @@ changes. Their providers must be in `OPENCODE_CONFIG`; rerun
 | OBS_ROUNDS | 4 | OBS/IBS build fix rounds per phase |
 | WALL_HOURS | 24 | total time per package |
 | BUILD_MEMORY / BUILD_JOBS | 8192 / 4 | build VM size |
+| BUILD_SLOTS | 2 | host-wide concurrent build cap, shared through `/results/.build-slots` |
 | BUILD_DISK_MB | 20000 | build VM disk; the worker can rerun one build with more |
 | SHADOW_REVIEWERS | empty | extra reviewer models for comparison (see above) |
 | SHADOW_MAX_STEPS / REVIEWER_MAX_STEPS | 120 / 200 | tool steps before a final answer is forced |

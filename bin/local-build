@@ -16,6 +16,31 @@ if [ "$n" -gt "$limit" ]; then
   echo "the evidence from the saved logs in $dir/logs, and what you tried."
   exit 98
 fi
+# A host-wide semaphore caps concurrent KVM builds across all containers.
+# BUILD_SLOTS slots, each a flock file under /results, released on exit.
+slots=${BUILD_SLOTS:-2}
+slot_fd=""
+case "$slots" in ''|*[!0-9]*) slots=0;; esac
+if [ "$slots" -gt 0 ]; then
+  mkdir -p /results/.build-slots 2>/dev/null || slots=0
+fi
+if [ "$slots" -gt 0 ]; then
+  while [ -z "$slot_fd" ]; do
+    for i in $(seq 1 "$slots"); do
+      exec {fd}>"/results/.build-slots/$i.lock"
+      if flock -n "$fd"; then
+        slot_fd=$fd
+        echo "build slot $i/$slots acquired"
+        break
+      fi
+      exec {fd}>&-
+    done
+    if [ -z "$slot_fd" ]; then
+      echo "waiting for a build slot (all $slots busy)"
+      sleep "${BUILD_SLOT_POLL:-30}"
+    fi
+  done
+fi
 echo "$n" > "$cnt_file"
 ts=$(date -u +%Y%m%dT%H%M%S)
 log="$dir/logs/${repo//\//_}-${arch}-${ts}.log"
