@@ -59,7 +59,9 @@ build (`which`), both models and the Bugzilla MCP. Every step can be
 rerun.
 
 The data directory (`ENABLER_DATA`) is separate from the code. It holds
-the package list, the master prompt, the lessons and `progress.md`; see
+the package list, `supported_codestreams.txt` (the product lines that
+may still receive a maintenance request), the master prompt, the lessons
+and `progress.md`; see
 `data-example/README.md` for the format. `host/build-image.sh` copies the
 prompt and lessons into the image, so rebuild after editing them.
 

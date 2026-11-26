@@ -40,6 +40,7 @@ LESSONS = f"{AGENT_DIR}/lessons"
 IBS_API = E.get("IBS_API", "")
 IBS_GITEA = E.get("IBS_GITEA", "")
 FIX_ORDER = "/data/sle15_fix_order.csv"
+SUPPORTED_CSTREAMS = "/data/supported_codestreams.txt"
 OBS_USER = E["OBS_USER"]
 
 LIMITS = {
@@ -68,6 +69,36 @@ TARGET_GRACE_HOURS = float(E.get("TARGET_GRACE_HOURS", 3))
 CHURN_LIMIT = int(E.get("BUILD_CHURN_LIMIT", 3))
 WORKER_TIMEOUT = int(E.get("WORKER_TIMEOUT", 5 * 3600))
 REVIEWER_TIMEOUT = int(E.get("REVIEWER_TIMEOUT", 2 * 3600))
+
+CODESTREAM_RE = re.compile(r"SUSE:[A-Za-z0-9][A-Za-z0-9:._-]*:Update")
+
+
+def supported_codestreams():
+    """Product lines that may still receive a maintenance request.
+
+    `osc maintained <pkg>` lists every maintenance project, including
+    product lines that are out of life cycle, so it is intersected with
+    this list before anything is submitted. A missing or empty file
+    means no SLE submission.
+    """
+    try:
+        with open(SUPPORTED_CSTREAMS) as f:
+            return [line.split("#", 1)[0].strip() for line in f
+                    if line.split("#", 1)[0].strip()]
+    except FileNotFoundError:
+        return []
+
+
+def report_codestreams(rep):
+    """Codestream projects named by the ibs_maintenance targets."""
+    out = set()
+    for t in rep.get("targets") or []:
+        if t.get("kind") != "ibs_maintenance":
+            continue
+        for key in ("name", "branch_project", "checkout"):
+            out.update(CODESTREAM_RE.findall(str(t.get(key) or "")))
+    return out
+
 
 FINAL_CODES = {"succeeded", "failed", "unresolvable", "broken", "disabled",
                "excluded", "locked"}
@@ -183,6 +214,30 @@ class Run:
     def close_all_gates(self):
         for g in ("submit_factory", "submit_sle"):
             self.gate(g, False)
+
+    @staticmethod
+    def supported_txt():
+        sup = supported_codestreams()
+        if sup:
+            return "  " + "\n  ".join(sup)
+        return ("  (none configured: " + SUPPORTED_CSTREAMS + " is missing or empty;\n"
+                "   do not branch, build or plan any SLE codestream, report blocked)")
+
+    def assert_sle_supported(self):
+        """Refuse to open the SLE submission gate for unsupported lines."""
+        sup = supported_codestreams()
+        rep = self.read_json(f"{self.phase_dir('sle')}/report.json")
+        if not sup:
+            raise Stop("blocked",
+                       "SLE submission is enabled but " + SUPPORTED_CSTREAMS +
+                       " is missing or empty. List the codestreams that are still "
+                       "supported (see https://www.suse.com/lifecycle/) in that file.")
+        bad = sorted(report_codestreams(rep) - set(sup))
+        if bad:
+            raise Stop("blocked",
+                       "refusing to submit to out-of-life-cycle codestreams: " +
+                       ", ".join(bad) + ". Keep only " + ", ".join(sup) +
+                       " and record the dropped ones in notes.")
 
     # ---------------------------------------------------------------- agents
     def agent(self, who, message, phase, step, session=None, final=False):
@@ -308,6 +363,20 @@ class Run:
             df = rep.get("diff_file")
             if df and not os.path.exists(df):
                 problems.append(f"diff_file {df} does not exist")
+        if phase == "sle" and oc == "ready":
+            sup = supported_codestreams()
+            bad = sorted(report_codestreams(rep) - set(sup))
+            if sup and bad:
+                problems.append(
+                    "out-of-life-cycle codestreams in targets: " + ", ".join(bad) +
+                    ". `osc maintained` lists them, but they are not in " +
+                    SUPPORTED_CSTREAMS + ". Drop them, record them in notes, "
+                    "and keep only: " + ", ".join(sup))
+            elif not sup and SUBMIT["sle"]:
+                problems.append(
+                    "SLE submission is enabled but " + SUPPORTED_CSTREAMS +
+                    " is missing or empty. Add the codestreams that are still "
+                    "supported to that file.")
         return problems
 
     def get_report(self, phase, step, retry_note):
@@ -430,12 +499,21 @@ The Factory phase is done. Its report:
 Factory diff: {self.rdir}/factory/change.diff
 Every SLE request must reference the Factory request: {', '.join(fr.get('requests') or []) or '(Factory tests already enabled, cite the Factory change)'}
 
-Scope of this phase: every maintained SLE 15 codestream on IBS
-(`osc -A ibs maintained <pkg>`; the SLE package name can differ) via
-`osc -A ibs mbranch`, and the SLFO / {IBS_GITEA} repo if one exists.
+Scope of this phase: the SLE codestreams that are still in support.
+`osc -A ibs maintained <pkg>` lists every maintenance project the
+package has, including product lines that are out of life cycle.
+Intersect it with this list and work only on what is in both:
+
+{self.supported_txt()}
+
+Put the codestream project name (for example SUSE:SLE-15-SP6:Update) in
+the target "name" for kind ibs_maintenance; the orchestrator checks it
+before any request is created. Record every codestream you drop, and
+why, in notes. The SLE package name can differ from Factory (freerdp2
+vs freerdp). Also cover the SLFO / {IBS_GITEA} repo if one exists.
 SLE ships older versions: adapt the change, do not copy the Factory
-spec. Do one local build against the oldest SLE 15 codestream you
-target (in the mbranch checkout) and one against the newest.
+spec. Do one local build against the oldest targeted codestream (in the
+mbranch checkout) and one against the newest.
 """
         else:
             extra = f"""
@@ -750,7 +828,8 @@ End with: REPORT WRITTEN."""
   verification table (repo/arch, tests passed) into the PR
   description."""
         elif submit and phase == "sle":
-            act = f"""Create the requests now:
+            act = f"""Create the requests now, only for the codestreams in
+{SUPPORTED_CSTREAMS} (out-of-life-cycle ones stay in notes):
 - IBS: `osc -A ibs mr` (maintenancerequest) from the mbranch project,
   message references the Factory request {', '.join(fr.get('requests') or [])}.
 - {IBS_GITEA}: remove the "WIP: " prefix and add the verification
@@ -1152,6 +1231,8 @@ of tool steps you can only reply in text). End with: REVIEW WRITTEN."""
 
         if not self.done(phase, "finalize"):
             if SUBMIT[phase]:
+                if phase == "sle":
+                    self.assert_sle_supported()
                 self.gate(f"submit_{phase}")
             cov = []
             if ph.get("out_of_scope"):
