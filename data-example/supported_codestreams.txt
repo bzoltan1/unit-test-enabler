@@ -1,0 +1,16 @@
+# Product lines that may still receive a maintenance request.
+# One IBS project per line; comments and blank lines are ignored.
+#
+# osc maintained <pkg> lists every maintenance project the package ever
+# had, including product lines that are out of life cycle (for example
+# SLE 15 GA and SP2 in 2026). The SLE phase intersects that list with
+# this file, and with SUBMIT_SLE=1 it refuses to open a request for a
+# codestream that is not here.
+#
+# Source of truth: https://www.suse.com/lifecycle/ and, for a specific
+# package, its maintainer. Re-check before each batch. Without this file
+# the SLE phase only produces a dry run.
+#
+# Example (replace with the lines your products still support):
+# SUSE:SLE-15-SP6:Update
+# SUSE:SLE-15-SP7:Update

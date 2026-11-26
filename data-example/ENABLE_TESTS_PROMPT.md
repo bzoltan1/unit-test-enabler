@@ -112,15 +112,20 @@ repositories.
    - the IBS codestream(s) where SLE 15 maintains the package (for
      example `osc -A @IBS_API@ maintained <pkg>`). The SLE
      package name can differ from Factory (for example `freerdp2` in
-     SLE vs `freerdp` in Factory).
+     SLE vs `freerdp` in Factory). **`maintained` also lists product
+     lines that are out of life cycle.** Keep only the codestreams
+     listed in `supported_codestreams.txt` in the data directory, drop
+     the rest, and record them as skipped in the report.
    - the SLFO / @IBS_GITEA@ repo, if there is one
 
    **Factory first is mandatory.** Every package gets two changes:
    - **Phase A, Factory:** an SR to the devel project, which then
      goes on to openSUSE:Factory.
    - **Phase B, SLE:** a maintenance request on IBS for each
-     maintained SLE 15 codestream, plus a @IBS_GITEA@ PR where it
-     applies.
+     maintained SLE 15 codestream that is still supported (see
+     `supported_codestreams.txt`), plus a @IBS_GITEA@ PR where it
+     applies. Never open a request for a product line that is out of
+     support.
 
    Phase B starts only after the Phase A SR is accepted, or at least
    submitted to Factory. Every Phase B request must reference the
@@ -385,6 +390,10 @@ repositories.
   resources OBS workers don't have.
 - Never merge, accept or decline a request or PR, including your own
   PR in a git-workflow devel project. The maintainers do that.
+- Never open a request for a product line that is out of support.
+  `osc maintained` is not a support list. Intersect it with
+  `supported_codestreams.txt`, and when a codestream is missing from
+  that file ask, do not submit.
 - Use the TodoWrite tool to track the steps for the current package.
 
 Start with step 1.
